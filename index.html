@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MVP작 최적화 계산기</title>
+<meta name="description" content="메이플스토리 캐시·마일리지·아이템 시세로 구매 조합과 순서를 계산합니다. 보유 마일리지만 사용하거나 구매 적립분을 재사용할 수 있습니다.">
+<style>
+  :root{
+    --bg:#eef2f7; --card:#ffffff; --line:#e3e9f1; --line2:#f0f4f9;
+    --ink:#0f172a; --ink2:#475569; --mute:#94a3b8;
+    --blue:#2563eb; --blue-s:#eff5ff;
+    --orange:#ea580c; --green:#16a34a; --red:#dc2626;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+    font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
+
+  .head{display:flex;gap:16px;align-items:flex-start;padding-bottom:20px;border-bottom:1px solid #dde4ee;margin-bottom:20px}
+  .logo{width:52px;height:52px;border-radius:13px;background:var(--blue-s);border:1px solid #dbe7fb;
+        display:flex;align-items:center;justify-content:center;font-size:26px;flex:none}
+  .head h1{margin:0;font-size:27px;font-weight:800;letter-spacing:-.02em}
+  .head p{margin:6px 0 0;color:var(--ink2);font-size:13.5px}
+  .flow{margin-top:9px;font-size:12px;color:var(--mute)}
+  .flow b{color:var(--blue);font-weight:700}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px}
+  .card > h2{margin:0 0 18px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px}
+  .card > h2 .i{color:var(--blue)}
+  .row-2{display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:stretch}
+  @media(max-width:920px){.row-2{grid-template-columns:1fr}}
+
+  .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:14px 16px}
+  .f label{display:block;font-size:12px;color:var(--ink2);margin-bottom:6px;font-weight:600}
+  .f .hint{font-size:11px;color:var(--mute);margin-top:5px;font-weight:400}
+  .ig{display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;background:#fff;
+      transition:border-color .12s,box-shadow .12s}
+  .ig:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .ig input{border:0;outline:0;background:transparent;width:100%;padding:9px 11px;
+      font:inherit;font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .ig .unit{padding:0 11px 0 4px;color:var(--mute);font-size:12px;white-space:nowrap;font-weight:600}
+
+  .rule{margin-top:16px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:11px 14px;
+        display:flex;flex-wrap:wrap;align-items:center;gap:9px 18px;font-size:12.5px;color:var(--ink2)}
+  .rule b{color:var(--ink);font-weight:700}
+  .rule input[type=text]{width:40px;border:1px solid #cbd5e1;border-radius:6px;padding:3px 4px;text-align:center;
+        font:inherit;font-weight:700;font-size:12.5px;color:var(--ink);background:#fff}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink2);cursor:pointer}
+
+  .sub{margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}
+  .sub .cap{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sub .cap span{font-weight:400;color:var(--mute);font-size:11.5px}
+
+  .eff{display:flex;flex-direction:column;justify-content:center}
+  .eff .t{font-size:13px;color:var(--ink2);font-weight:600;text-align:center}
+  .eff .v{font-size:40px;font-weight:800;letter-spacing:-.03em;margin:6px 0 2px;color:var(--orange);text-align:center}
+  .eff .s{font-size:12.5px;color:var(--ink2);text-align:center}
+  .eff .d{margin-top:15px;padding-top:14px;border-top:1px dashed var(--line);font-size:12px;color:var(--ink2)}
+  .eff .d div{display:flex;justify-content:space-between;padding:3px 0}
+  .eff .d b{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:700}
+  .eff .msg{margin-top:13px;background:#f8fafc;border-radius:9px;padding:10px 12px;font-size:11.5px;color:var(--ink2);line-height:1.65}
+
+  .sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:14px}
+  .sum .k{font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:7px}
+  .sum .n{font-size:23px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .sum .n small{font-size:12px;font-weight:600;color:var(--mute);margin-left:3px}
+  .c-blue{color:var(--blue)} .c-org{color:var(--orange)} .c-grn{color:var(--green)} .c-red{color:var(--red)}
+
+  .tbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+  .tbar h2{margin:0}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  button{font:inherit;cursor:pointer}
+  .btn{background:#fff;border:1px solid #cbd5e1;border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;color:var(--ink2)}
+  .btn:hover{background:#f8fafc;border-color:#94a3b8}
+  .btn:focus-visible,.go:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+  .go{background:var(--blue);border:1px solid var(--blue);color:#fff;border-radius:10px;
+      padding:12px 30px;font-size:15px;font-weight:700;width:100%;margin-top:18px}
+  .go:hover{background:#1d4ed8}
+
+  .scroll{overflow-x:auto;margin:0 -22px;padding:0 22px}
+  table{width:100%;border-collapse:collapse;min-width:940px}
+  th{font-size:12px;color:var(--ink2);font-weight:600;text-align:right;padding:0 10px 10px;
+     border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:9px 10px;border-bottom:1px solid var(--line2);text-align:right;
+     font-variant-numeric:tabular-nums;white-space:nowrap}
+  tbody tr:last-child td{border-bottom:0}
+  td input[type=text]{border:1px solid transparent;border-radius:7px;padding:8px 9px;font:inherit;
+      font-size:14px;width:100%;text-align:right;background:#f8fafc;font-variant-numeric:tabular-nums;color:var(--ink);outline:0}
+  td input.name{text-align:left;font-weight:600}
+  td input[type=text]:hover{border-color:#dbe3ee}
+  td input[type=text]:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+  td input::placeholder{color:#b8c4d4;font-weight:400}
+  input[type=checkbox]{width:17px;height:17px;accent-color:var(--blue);cursor:pointer;margin:0}
+  .del{background:none;border:0;color:#cbd5e1;font-size:17px;padding:4px 7px;line-height:1;border-radius:6px}
+  .del:hover{color:var(--red);background:#fef2f2}
+  .effcell{font-weight:700;color:var(--blue)}
+  .effcell.bad{color:var(--mute);font-weight:400}
+  .rr{font-weight:800;font-size:14.5px}
+  .rr small{display:block;font-size:11px;font-weight:600;color:var(--mute);margin-top:2px}
+
+  #result{display:none}
+  .plan td{font-size:14px}
+  .plan .mi{color:var(--green);font-weight:700}
+  .plan .ca{color:var(--blue);font-weight:700}
+  .plan .zero{color:#cbd5e1;font-weight:400}
+  .plan tr.mm td{background:#fffdf5}
+  .plan tr.mm td:first-child{font-weight:700;color:#a16207}
+  .note{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;
+        font-size:12.5px;color:#854d0e;margin-top:12px;line-height:1.7}
+  .note.ok{background:#f0fdf4;border-color:#bbf7d0;color:#14532d}
+  .note.bad{background:#fef2f2;border-color:#fecaca;color:#7f1d1d}
+  .note b{font-weight:700}
+  .foot{color:var(--mute);font-size:12px;margin-top:22px;line-height:1.8}
+  details.how{margin-top:14px}
+  details.how summary{cursor:pointer;font-size:12.5px;color:var(--ink2);font-weight:600;padding:6px 0}
+  details.how div{font-size:12.5px;color:var(--ink2);line-height:1.9;padding:8px 0 0}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  .go:disabled{opacity:.6;cursor:wait}
+  #calcStatus{margin-top:12px;color:var(--ink2)}
+  #sequenceRows td:nth-child(2){text-align:left}
+</style>
+</head>
+<body>
+<noscript>계산기를 사용하려면 JavaScript를 활성화해주세요.</noscript>
+
+<div class="wrap">
+
+  <div class="head">
+    <div class="logo">🧮</div>
+    <div>
+      <h1>MVP작 최적화 계산기</h1>
+      <p>충전한 현금을 최대한 많이 현금으로 되찾는 조합을 계산합니다</p>
+      <div class="flow">현금 → 캐시 → <b>캐시템 / 메소마켓</b> → 메소 → 물통 거래 → 현금 &nbsp;·&nbsp; 보유분만 사용 / 구매 적립분 재사용 선택</div>
+    </div>
+  </div>
+
+  <div class="row-2">
+    <div class="card">
+      <h2><span class="i">⚙</span> 전역 설정</h2>
+      <div class="fields">
+        <div class="f">
+          <label for="chargeRatio">충전 비율</label>
+          <div class="ig"><input type="text" id="chargeRatio" value="93"><span class="unit">%</span></div>
+          <div class="hint" id="chargeHint">1,000캐시 = 930원</div>
+        </div>
+        <div class="f">
+          <label for="chargeWon">충전 예산 (현금)</label>
+          <div class="ig"><input type="text" id="chargeWon" value="1,000,000"><span class="unit">원</span></div>
+        </div>
+        <div class="f">
+          <label for="ownCash">보유 캐시</label>
+          <div class="ig"><input type="text" id="ownCash" value="0"><span class="unit">캐시</span></div>
+          <div class="hint">이미 있는 잔여분</div>
+        </div>
+        <div class="f">
+          <label for="ownMileage">보유 마일리지</label>
+          <div class="ig"><input type="text" id="ownMileage" value="0"><span class="unit">P</span></div>
+          <div class="hint">병용 결제 전 보유한 금액</div>
+        </div>
+        <div class="f">
+          <label for="fee">경매장 수수료</label>
+          <div class="ig"><input type="text" id="fee" value="5"><span class="unit">%</span></div>
+          <div class="hint">캐시템 판매 시 차감</div>
+        </div>
+        <div class="f">
+          <label for="mesoPrice">물통 시세 (1억 메소)</label>
+          <div class="ig"><input type="text" id="mesoPrice" value="1,550"><span class="unit">원</span></div>
+          <div class="hint">유일한 현금 출구</div>
+        </div>
+      </div>
+
+      <div class="rule">
+        <b>마일리지 계산 설정</b>
+        <span>구매 금액의 <input type="text" id="earnRate" value="5" aria-label="마일리지 적립률">% 적립</span>
+        <span>병용 결제 비율 <input type="text" id="mileRate" value="30" aria-label="마일리지 사용률">% 사용</span>
+        <label class="chk"><input type="checkbox" id="earnOnCashOnly" checked> 마일리지 결제분은 적립 제외</label>
+      </div>
+
+      <div class="rule">
+        <label class="chk"><input type="checkbox" id="reuseMileage"> 구매 후 적립분을 다음 구매에 재사용</label>
+        <span>해제하면 보유 마일리지만 사용</span>
+        <label for="earnCap">이번 작업의 남은 적립 한도 (P)</label><input type="text" id="earnCap" placeholder="무제한" style="width:110px" inputmode="numeric">
+      </div>
+      <div class="hint" style="margin-top:10px;color:var(--ink2)">재사용 시 각 결제 후 적립금 수령이 필요합니다. 소수 마일리지는 건별 내림하며, 묶음 상품은 묶음 전체를 한 행에 입력하세요.</div>
+      <div class="sub">
+        <div class="cap">
+          <label class="chk"><input type="checkbox" id="useMarket" checked> 메소마켓 활용</label>
+          <span>캐시템으로 못 쓴 잔여 캐시를 메소로 바꿉니다</span>
+        </div>
+        <div class="fields">
+          <div class="f">
+            <label for="mesoMarket">메소마켓 시세 (1억 메소)</label>
+            <div class="ig"><input type="text" id="mesoMarket" value="2,200"><span class="unit">메포</span></div>
+            <div class="hint">메포 1 = 캐시 1로 계산</div>
+          </div>
+          <div class="f">
+            <label for="marketCap">메소마켓 구매 한도</label>
+            <div class="ig"><input type="text" id="marketCap" placeholder="무제한"><span class="unit">억</span></div>
+            <div class="hint">기간 내 구매 가능량</div>
+          </div>
+          <div class="f" style="align-self:center">
+            <label class="chk" style="margin-bottom:8px"><input type="checkbox" id="marketMile"> 마일리지 사용 가능</label>
+            <label class="chk"><input type="checkbox" id="marketEarn"> 마일리지 적립 대상</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card eff">
+      <div class="t">메소마켓 기준선</div>
+      <div class="v" id="effVal">—</div>
+      <div class="s">캐시 → 메소마켓 → 물통 현금 회수율</div>
+      <div class="d">
+        <div><span>1억 메소 구매 원가</span><b id="effA">—</b></div>
+        <div><span>1억 메소 판매 대금</span><b id="effB">—</b></div>
+        <div><span>1억당 손익</span><b id="effC">—</b></div>
+      </div>
+      <div class="msg">단위 가격 비교용 기준선입니다. 실제 조합은 마일리지, 정수 수량, 구매 한도와 잔여 캐시에 따라 달라집니다.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tbar">
+      <h2><span class="i">📦</span> 캐시템 목록</h2>
+      <div class="btns">
+        <button class="btn" id="bExample">예시 채우기</button>
+        <button class="btn" id="bSort">회수율순 정렬</button>
+        <button class="btn" id="bExport">내보내기</button>
+        <button class="btn" id="bImport">불러오기</button>
+        <button class="btn" id="bClear">목록 초기화</button>
+        <button class="btn" id="bAdd">+ 행 추가</button>
+      </div>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th style="width:23%">아이템 이름</th>
+          <th style="width:12%">캐시 원가</th>
+          <th style="width:20%">경매장 예상가 (메소)</th>
+          <th style="width:10%">최대 수량</th>
+          <th style="width:10%">마일리지 사용</th>
+          <th>마일리지 적립</th>
+          <th style="width:12%">효율 (메소/캐시)</th>
+          <th style="width:13%">현금 회수율</th>
+          <th style="width:36px"></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <button class="go" id="bCalc">구매 조합 계산하기</button>
+    <div id="calcStatus" role="status" aria-live="polite"></div>
+    <div id="storageStatus" role="status" style="font-size:12px;color:var(--ink2)">입력값은 이 브라우저에 자동 저장됩니다.</div>
+    <details class="how">
+      <summary>계산 방식 보기</summary>
+      <div>
+        <b>목표는 주어진 예산에서 수수료 차감 후 획득 메소를 최대화하는 것입니다.</b>
+        캐시 전액 결제와 마일리지 병용 결제를 각각 정수 수량으로 비교하며, 결제 전 잔액과 아이템별 구매 한도를 확인합니다.
+        메소마켓은 1억 단위의 별도 구매 후보로 계산합니다.<br><br>
+        작은 문제는 모든 구매 조합을 탐색합니다. 계산량이 많으면 후보를 줄여 추천안을 찾으며, 이 경우 결과에 <b>최적해 미보장</b>을 표시합니다.
+        구매 순서는 결제 후 적립금을 수령하는 기준입니다. 연속된 같은 구매는 한 줄로 합쳐 표시하지만, 결제는 1개씩 진행하세요.<br><br>
+        회수율 = 예상 회수 현금 ÷ (사용 캐시 × 충전 비율). 보유 캐시도 같은 비율로 원가에 포함합니다.
+        마일리지의 별도 취득 원가와 가격 변동은 반영하지 않습니다.
+      </div>
+    </details>
+  </div>
+
+  <div id="result">
+    <div class="card">
+      <h2><span class="i">📊</span> 종합 결과</h2>
+      <div class="sum" id="sumBox"></div>
+      <div id="notes"></div>
+    </div>
+    <div class="card">
+      <h2><span class="i">✅</span> 추천 구매 계획</h2>
+      <div class="scroll">
+        <table class="plan">
+          <thead><tr>
+            <th style="width:23%">아이템</th>
+            <th>마일리지 구매</th>
+            <th>캐시 전액 구매</th>
+            <th>총 수량</th>
+            <th>사용 캐시</th>
+            <th>사용 마일리지</th>
+            <th>획득 메소</th>
+            <th>회수 현금</th>
+          </tr></thead>
+          <tbody id="planRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>구매 순서</h2>
+      <p>표의 순서대로 1개씩 결제하세요. 재사용 모드에서는 매 구매 후 적립금을 수령한 뒤 다음 구매를 진행하세요.</p>
+      <div class="scroll"><table><thead><tr><th>순서</th><th>아이템</th><th>결제 방식</th><th>반복 수량</th><th>적립 P</th><th>남은 캐시</th><th>사용 가능한 P</th></tr></thead><tbody id="sequenceRows"></tbody></table></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>규칙 확인일: 2026-09-15.</b> <a href="https://maplestory.nexon.com/testworld/news/update/199?page=1" target="_blank" rel="noopener noreferrer">공식 테스트월드 공지</a>에는 9/17 구매 적립금 개편이 예고되어 있습니다. 정식 적용 여부를 확인하고, 마일리지 신규 적립이 중단되면 적립률을 0%로 설정하세요. 메이플크레딧 가치는 이 계산에 포함하지 않습니다.<br>
+    <a href="https://gi.maplestory.nexon.com/Guide/System/Mileage" target="_blank" rel="noopener noreferrer">마일리지 안내</a> · <a href="https://maplestory.nexon.com/Guide/N23GameInformation/Articles/425" target="_blank" rel="noopener noreferrer">MVP 안내</a><br>
+    시세·수수료는 직접 확인한 값을 넣어야 결과가 맞습니다. 기본값은 예시입니다.<br>
+    메포를 캐시와 같은 충전 비율로 얻는다고 가정합니다. 전환 조건이 다르면 메소마켓 시세를 실효 캐시 기준으로 환산해 넣으세요.
+  </div>
+</div>
+
+<script src="app.js" defer></script>
+</body>
+</html>
