@@ -1,7 +1,7 @@
 const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
-const root=path.resolve(__dirname,'../public');
+const root=path.resolve(__dirname,'../dist');
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8'};
 http.createServer((req,res)=>{
   const url=new URL(req.url,'http://localhost');
