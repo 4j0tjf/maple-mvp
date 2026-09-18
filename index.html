@@ -4,14 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MVP작 최적화 계산기</title>
-<meta name="description" content="메이플스토리 캐시·마일리지·아이템 시세로 구매 조합과 순서를 계산합니다. 보유 마일리지만 사용하거나 구매 적립분을 재사용할 수 있습니다.">
+<meta name="description" content="메이플스토리 캐시 결제와 메이플크레딧 적립·크레딧샵 구매를 함께 계산해 구매 조합과 순서를 찾습니다.">
 <style>
+  /* Maple Market(src/app/globals.css)의 표면·글자·강조 토큰을 그대로 따른다.
+     표면은 0(페이지) → 1(카드) → 2(입력/보조) → 3(hover) 순으로 밝아진다. */
   :root{
-    --bg:#eef2f7; --card:#ffffff; --line:#e3e9f1; --line2:#f0f4f9;
-    --ink:#0f172a; --ink2:#475569; --mute:#94a3b8;
-    --blue:#2563eb; --blue-s:#eff5ff;
-    --orange:#ea580c; --green:#16a34a; --red:#dc2626;
+    --bg:#09090b; --card:#131317; --card2:#1c1c21; --card3:#26262c;
+    --line:#2e2e35; --line2:#26262c; --line-strong:#43434c;
+    --ink:#f4f4f5; --ink2:#a1a1aa; --mute:#8f8f99;
+    --accent:#fbbf24; --accent-ink:#1c1917; --accent-soft:#2a2210;
+    --orange:#fb923c; --green:#4ade80; --red:#f87171;
     --r:14px;
+    color-scheme:dark;
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
@@ -22,35 +26,43 @@
   }
   .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
 
-  .head{display:flex;gap:16px;align-items:flex-start;padding-bottom:20px;border-bottom:1px solid #dde4ee;margin-bottom:20px}
-  .logo{width:52px;height:52px;border-radius:13px;background:var(--blue-s);border:1px solid #dbe7fb;
+  /* Maple Market의 상단 내비게이션과 같은 구성. /mvp로 서빙될 때만 보인다. */
+  .sitenav{position:sticky;top:0;z-index:30;border-bottom:1px solid var(--line);background:rgba(9,9,11,.9);backdrop-filter:blur(8px)}
+  .sitenav .inner{max-width:1500px;margin:0 auto;display:flex;align-items:center;gap:4px;padding:0 20px}
+  .sitenav .brand{margin-right:20px;padding:14px 0;font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--ink)}
+  .sitenav a{border-bottom:2px solid transparent;padding:14px 12px;font-size:14px;font-weight:500;color:var(--mute);text-decoration:none;transition:color .12s}
+  .sitenav a:hover{color:var(--ink2)}
+  .sitenav a[aria-current=page]{border-bottom-color:var(--accent);color:var(--ink)}
+
+  .head{display:flex;gap:16px;align-items:flex-start;padding-bottom:20px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .logo{width:52px;height:52px;border-radius:13px;background:var(--accent-soft);border:1px solid #4a3a12;
         display:flex;align-items:center;justify-content:center;font-size:26px;flex:none}
   .head h1{margin:0;font-size:27px;font-weight:800;letter-spacing:-.02em}
   .head p{margin:6px 0 0;color:var(--ink2);font-size:13.5px}
   .flow{margin-top:9px;font-size:12px;color:var(--mute)}
-  .flow b{color:var(--blue);font-weight:700}
+  .flow b{color:var(--accent);font-weight:700}
 
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px}
   .card > h2{margin:0 0 18px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px}
-  .card > h2 .i{color:var(--blue)}
+  .card > h2 .i{color:var(--accent)}
   .row-2{display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:stretch}
   @media(max-width:920px){.row-2{grid-template-columns:1fr}}
 
   .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:14px 16px}
   .f label{display:block;font-size:12px;color:var(--ink2);margin-bottom:6px;font-weight:600}
   .f .hint{font-size:11px;color:var(--mute);margin-top:5px;font-weight:400}
-  .ig{display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:9px;background:#fff;
+  .ig{display:flex;align-items:center;border:1px solid var(--line-strong);border-radius:9px;background:var(--card2);
       transition:border-color .12s,box-shadow .12s}
-  .ig:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  .ig:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(251,191,36,.18)}
   .ig input{border:0;outline:0;background:transparent;width:100%;padding:9px 11px;
       font:inherit;font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
   .ig .unit{padding:0 11px 0 4px;color:var(--mute);font-size:12px;white-space:nowrap;font-weight:600}
 
-  .rule{margin-top:16px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:11px 14px;
+  .rule{margin-top:16px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:11px 14px;
         display:flex;flex-wrap:wrap;align-items:center;gap:9px 18px;font-size:12.5px;color:var(--ink2)}
   .rule b{color:var(--ink);font-weight:700}
-  .rule input[type=text]{width:40px;border:1px solid #cbd5e1;border-radius:6px;padding:3px 4px;text-align:center;
-        font:inherit;font-weight:700;font-size:12.5px;color:var(--ink);background:#fff}
+  .rule input[type=text]{width:40px;border:1px solid var(--line-strong);border-radius:6px;padding:3px 4px;text-align:center;
+        font:inherit;font-weight:700;font-size:12.5px;color:var(--ink);background:var(--card3)}
   .chk{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink2);cursor:pointer}
 
   .sub{margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)}
@@ -64,27 +76,29 @@
   .eff .d{margin-top:15px;padding-top:14px;border-top:1px dashed var(--line);font-size:12px;color:var(--ink2)}
   .eff .d div{display:flex;justify-content:space-between;padding:3px 0}
   .eff .d b{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:700}
-  .eff .msg{margin-top:13px;background:#f8fafc;border-radius:9px;padding:10px 12px;font-size:11.5px;color:var(--ink2);line-height:1.65}
+  .eff .msg{margin-top:13px;background:var(--card2);border-radius:9px;padding:10px 12px;font-size:11.5px;color:var(--ink2);line-height:1.65}
 
   .sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:14px}
   .sum .k{font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:7px}
   .sum .n{overflow-wrap:anywhere;font-size:23px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
   .sum .n small{font-size:12px;font-weight:600;color:var(--mute);margin-left:3px}
-  .c-blue{color:var(--blue)} .c-org{color:var(--orange)} .c-grn{color:var(--green)} .c-red{color:var(--red)}
+  .c-blue{color:var(--accent)} .c-org{color:var(--orange)} .c-grn{color:var(--green)} .c-red{color:var(--red)}
 
   .tbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px}
   .tbar h2{margin:0}
   .btns{display:flex;gap:8px;flex-wrap:wrap}
   button{font:inherit;cursor:pointer}
-  .btn{background:#fff;border:1px solid #cbd5e1;border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;color:var(--ink2)}
-  .btn:hover{background:#f8fafc;border-color:#94a3b8}
-  .btn:focus-visible,.go:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-  .go{background:var(--blue);border:1px solid var(--blue);color:#fff;border-radius:10px;
+  .btn{background:var(--card2);border:1px solid var(--line-strong);border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;color:var(--ink2)}
+  .btn:hover{background:var(--card3);border-color:var(--mute);color:var(--ink)}
+  .btn:focus-visible,.go:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .go{background:var(--accent);border:1px solid var(--accent);color:var(--accent-ink);border-radius:10px;
       padding:12px 30px;font-size:15px;font-weight:700;width:100%;margin-top:18px}
-  .go:hover{background:#1d4ed8}
+  .go:hover{background:#f0b418}
 
   .scroll{overflow-x:auto;margin:0 -22px;padding:0 22px}
   table{width:100%;border-collapse:collapse;min-width:940px}
+  /* 크레딧샵 표는 6열이라 캐시템 표(8열)만큼 넓을 필요가 없다. */
+  table.narrow{min-width:620px}
   th{font-size:12px;color:var(--ink2);font-weight:600;text-align:right;padding:0 10px 10px;
      border-bottom:1px solid var(--line);white-space:nowrap}
   th:first-child,td:first-child{text-align:left}
@@ -92,15 +106,15 @@
      font-variant-numeric:tabular-nums;white-space:nowrap}
   tbody tr:last-child td{border-bottom:0}
   td input[type=text]{border:1px solid transparent;border-radius:7px;padding:8px 9px;font:inherit;
-      font-size:14px;width:100%;text-align:right;background:#f8fafc;font-variant-numeric:tabular-nums;color:var(--ink);outline:0}
+      font-size:14px;width:100%;text-align:right;background:var(--card2);font-variant-numeric:tabular-nums;color:var(--ink);outline:0}
   td input.name{text-align:left;font-weight:600}
-  td input[type=text]:hover{border-color:#dbe3ee}
-  td input[type=text]:focus{border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
-  td input::placeholder{color:#b8c4d4;font-weight:400}
-  input[type=checkbox]{width:17px;height:17px;accent-color:var(--blue);cursor:pointer;margin:0}
-  .del{background:none;border:0;color:#cbd5e1;font-size:17px;padding:4px 7px;line-height:1;border-radius:6px}
-  .del:hover{color:var(--red);background:#fef2f2}
-  .effcell{font-weight:700;color:var(--blue)}
+  td input[type=text]:hover{border-color:var(--line-strong)}
+  td input[type=text]:focus{border-color:var(--accent);background:var(--card3);box-shadow:0 0 0 3px rgba(251,191,36,.15)}
+  td input::placeholder{color:var(--mute);font-weight:400}
+  input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent);cursor:pointer;margin:0}
+  .del{background:none;border:0;color:var(--mute);font-size:17px;padding:4px 7px;line-height:1;border-radius:6px}
+  .del:hover{color:var(--red);background:#2a1414}
+  .effcell{font-weight:700;color:var(--accent)}
   .effcell.bad{color:var(--mute);font-weight:400}
   .rr{font-weight:800;font-size:14.5px}
   .rr small{display:block;font-size:11px;font-weight:600;color:var(--mute);margin-top:2px}
@@ -108,20 +122,28 @@
   #result{display:none}
   .plan td{font-size:14px}
   .plan .mi{color:var(--green);font-weight:700}
-  .plan .ca{color:var(--blue);font-weight:700}
-  .plan .zero{color:#cbd5e1;font-weight:400}
-  .plan tr.mm td{background:#fffdf5}
-  .plan tr.mm td:first-child{font-weight:700;color:#a16207}
-  .note{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;
-        font-size:12.5px;color:#854d0e;margin-top:12px;line-height:1.7}
-  .note.ok{background:#f0fdf4;border-color:#bbf7d0;color:#14532d}
-  .note.bad{background:#fef2f2;border-color:#fecaca;color:#7f1d1d}
+  .plan .ca{color:var(--accent);font-weight:700}
+  .plan .zero{color:var(--mute);font-weight:400}
+  .plan tr.mm td{background:var(--accent-soft)}
+  .plan tr.mm td:first-child{font-weight:700;color:var(--accent)}
+  .note{background:#241d0e;border:1px solid #4a3a12;border-radius:10px;padding:12px 14px;
+        font-size:12.5px;color:#fcd34d;margin-top:12px;line-height:1.7}
+  .note.ok{background:#0f2418;border-color:#1c5334;color:#86efac}
+  .note.bad{background:#2a1414;border-color:#5c1d1d;color:#fca5a5}
   .note b{font-weight:700}
+  /* 확인 대기·제외 목록은 카드 안의 보조 정보다. 기본 불릿 대신 카드 표면을 쓴다. */
+  .list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px}
+  .list li{background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12.5px;color:var(--ink2)}
+  .list:empty{display:none}
+  details.sub-details{margin-top:10px}
+  details.sub-details > summary{cursor:pointer;font-size:12.5px;color:var(--ink2);font-weight:600;padding:4px 0}
   .foot{color:var(--mute);font-size:12px;margin-top:22px;line-height:1.8}
+  .foot a{color:var(--ink2)}
+  a{color:var(--accent)}
   details.how{margin-top:14px}
   details.how summary{cursor:pointer;font-size:12.5px;color:var(--ink2);font-weight:600;padding:6px 0}
   details.how div{font-size:12.5px;color:var(--ink2);line-height:1.9;padding:8px 0 0}
-  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  code{background:var(--card3);padding:1px 5px;border-radius:4px;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace}
   @media (prefers-reduced-motion:reduce){*{transition:none!important}}
   .go:disabled{opacity:.6;cursor:wait}
   #calcStatus{margin-top:12px;color:var(--ink2)}
@@ -131,6 +153,15 @@
 <body>
 <noscript>계산기를 사용하려면 JavaScript를 활성화해주세요.</noscript>
 
+<nav class="sitenav" id="siteNav" hidden>
+  <div class="inner">
+    <span class="brand">Maple Market</span>
+    <a href="/">시세 기록</a>
+    <a href="/admin">수집 관리</a>
+    <a href="/mvp" aria-current="page">MVP작</a>
+  </div>
+</nav>
+
 <div class="wrap">
 
   <div class="head">
@@ -138,7 +169,7 @@
     <div>
       <h1>MVP작 최적화 계산기</h1>
       <p>충전한 현금을 최대한 많이 현금으로 되찾는 조합을 계산합니다</p>
-      <div class="flow">현금 → 캐시 → <b>캐시템 / 메소마켓</b> → 메소 → 물통 거래 → 현금 &nbsp;·&nbsp; 보유분만 사용 / 구매 적립분 재사용 선택</div>
+      <div class="flow">현금 → 캐시 → <b>캐시템 / 메소마켓</b> → 메소 → 물통 거래 → 현금 &nbsp;·&nbsp; 결제액의 5% <b>메이플크레딧</b> → 크레딧샵 상품 → 메소</div>
     </div>
   </div>
 
@@ -161,9 +192,9 @@
           <div class="hint">이미 있는 잔여분</div>
         </div>
         <div class="f">
-          <label for="ownMileage">보유 마일리지</label>
-          <div class="ig"><input type="text" id="ownMileage" value="0"><span class="unit">P</span></div>
-          <div class="hint">병용 결제 전 보유한 금액</div>
+          <label for="ownCredit">보유 메이플크레딧</label>
+          <div class="ig"><input type="text" id="ownCredit" value="0"><span class="unit">C</span></div>
+          <div class="hint">크레딧샵에서만 사용</div>
         </div>
         <div class="f">
           <label for="fee">경매장 수수료</label>
@@ -178,18 +209,12 @@
       </div>
 
       <div class="rule">
-        <b>마일리지 계산 설정</b>
-        <span>구매 금액의 <input type="text" id="earnRate" value="5" aria-label="마일리지 적립률">% 적립</span>
-        <span>병용 결제 비율 <input type="text" id="mileRate" value="30" aria-label="마일리지 사용률">% 사용</span>
-        <label class="chk"><input type="checkbox" id="earnOnCashOnly" checked> 마일리지 결제분은 적립 제외</label>
+        <b>크레딧 적립 설정</b>
+        <span>결제 금액의 <input type="text" id="earnRate" value="5" aria-label="크레딧 적립률">% 적립</span>
+        <span><input type="text" id="minEarnCash" value="10" aria-label="적립 최소 결제액" style="width:60px">캐시 미만은 적립 제외</span>
+        <label for="earnCap">이번 작업의 남은 적립 한도 (C)</label><input type="text" id="earnCap" placeholder="무제한" style="width:110px" inputmode="numeric">
       </div>
-
-      <div class="rule">
-        <label class="chk"><input type="checkbox" id="reuseMileage"> 구매 후 적립분을 다음 구매에 재사용</label>
-        <span>해제하면 보유 마일리지만 사용</span>
-        <label for="earnCap">이번 작업의 남은 적립 한도 (P)</label><input type="text" id="earnCap" placeholder="무제한" style="width:110px" inputmode="numeric">
-      </div>
-      <div class="hint" style="margin-top:10px;color:var(--ink2)">재사용 시 각 결제 후 적립금 수령이 필요합니다. 소수 마일리지는 건별 내림하며, 묶음 상품은 묶음 전체를 한 행에 입력하세요.</div>
+      <div class="hint" style="margin-top:10px;color:var(--ink2)">2026-09-17 개편으로 마일리지 병용 결제(상품가 30%)는 사라졌습니다. 적립된 크레딧은 <b>크레딧샵 상품 구매에만</b> 사용하며, 선물 결제는 적립되지 않습니다.</div>
       <div class="sub">
         <div class="cap">
           <label class="chk"><input type="checkbox" id="useMarket" checked> 메소마켓 활용</label>
@@ -207,8 +232,7 @@
             <div class="hint">기간 내 구매 가능량</div>
           </div>
           <div class="f" style="align-self:center">
-            <label class="chk" style="margin-bottom:8px"><input type="checkbox" id="marketMile"> 마일리지 사용 가능</label>
-            <label class="chk"><input type="checkbox" id="marketEarn"> 마일리지 적립 대상</label>
+            <label class="chk"><input type="checkbox" id="marketEarn"> 크레딧 적립 대상</label>
           </div>
         </div>
       </div>
@@ -223,7 +247,7 @@
         <div><span>1억 메소 판매 대금</span><b id="effB">—</b></div>
         <div><span>1억당 손익</span><b id="effC">—</b></div>
       </div>
-      <div class="msg">단위 가격 비교용 기준선입니다. 실제 조합은 마일리지, 정수 수량, 구매 한도와 잔여 캐시에 따라 달라집니다.</div>
+      <div class="msg">단위 가격 비교용 기준선입니다. 실제 조합은 적립 크레딧의 가치, 정수 수량, 구매 한도와 잔여 캐시에 따라 달라집니다.</div>
     </div>
   </div>
 
@@ -242,19 +266,50 @@
     <div class="scroll">
       <table>
         <thead><tr>
-          <th style="width:23%">아이템 이름</th>
-          <th style="width:12%">캐시 원가</th>
-          <th style="width:20%">경매장 예상가 (메소)</th>
-          <th style="width:10%">최대 수량</th>
-          <th style="width:10%">마일리지 사용</th>
-          <th>마일리지 적립</th>
+          <th style="width:25%">아이템 이름</th>
+          <th style="width:13%">캐시 원가</th>
+          <th style="width:22%">경매장 예상가 (메소)</th>
+          <th style="width:11%">최대 수량</th>
+          <th style="width:10%">크레딧 적립</th>
           <th style="width:12%">효율 (메소/캐시)</th>
-          <th style="width:13%">현금 회수율</th>
+          <th style="width:14%">현금 회수율</th>
           <th style="width:36px"></th>
         </tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
+    <details id="thinMarketBox" class="sub-details" hidden><summary>최근 거래가 적어 제외된 상품</summary><ul id="thinMarket" class="list"></ul></details>
+    <div id="cashShopControls" hidden style="margin:16px 0">
+      <label><input id="autoCashShop" type="checkbox"> 계산할 때 캐시 상품 시세 자동 반영</label>
+      <p style="font-size:14px">루나 기준 등록 최저가입니다. 하루 첫 계산 요청에만 수집하고 당일 결과를 공유합니다. 남/여 선택지는 각각의 최저가 중 높은 쪽을 사용합니다.</p>
+      <div id="cashShopStatus" role="status" aria-live="polite"></div>
+      <p><a href="http://127.0.0.1:3000/admin/cash-shop" target="_blank" rel="noopener">상품 구성·캐시 원가·크레딧샵 목록 확인</a></p>
+      <details><summary>판매 상품 확인 대기</summary><ul id="cashShopPending" class="list"></ul></details>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tbar">
+      <h2><span class="i">🎟</span> 크레딧샵 상품</h2>
+      <div class="btns"><button class="btn" id="bAddCredit">+ 행 추가</button></div>
+    </div>
+    <p style="font-size:13px;color:var(--ink2);margin:0 0 14px">적립한 크레딧으로만 살 수 있는 상품입니다. 캐시 상품 가격을 대신 낼 수 없으므로, 적립 크레딧의 가치는 여기서 살 수 있는 상품의 <b>메소/크레딧</b> 효율로 정해집니다.</p>
+    <div class="scroll">
+      <table class="narrow">
+        <thead><tr>
+          <th style="width:32%">상품 이름</th>
+          <th style="width:15%">크레딧 가격</th>
+          <th style="width:25%">경매장 예상가 (메소)</th>
+          <th style="width:13%">월 구매 한도</th>
+          <th style="width:15%">효율 (메소/크레딧)</th>
+          <th style="width:36px"></th>
+        </tr></thead>
+        <tbody id="creditRows"></tbody>
+      </table>
+    </div>
+    <div class="rule" id="creditValue" style="margin-top:14px">크레딧샵 상품의 시세를 입력하면 적립 크레딧의 가치를 계산합니다.</div>
+    <div id="creditShopStatus" role="status" aria-live="polite" style="margin-top:10px;font-size:13px;color:var(--ink2)"></div>
+    <details class="sub-details"><summary>이번 달 검색에서 제외된 상품</summary><ul id="creditExcluded" class="list"></ul></details>
     <button class="go" id="bCalc">구매 조합 계산하기</button>
     <div id="calcStatus" role="status" aria-live="polite"></div>
     <div id="storageStatus" role="status" style="font-size:12px;color:var(--ink2)">입력값은 이 브라우저에 자동 저장됩니다.</div>
@@ -262,12 +317,12 @@
       <summary>계산 방식 보기</summary>
       <div>
         <b>목표는 주어진 예산에서 수수료 차감 후 획득 메소를 최대화하는 것입니다.</b>
-        캐시 전액 결제와 마일리지 병용 결제를 각각 정수 수량으로 비교하며, 결제 전 잔액과 아이템별 구매 한도를 확인합니다.
-        메소마켓은 1억 단위의 별도 구매 후보로 계산합니다.<br><br>
+        캐시 상품은 넥슨캐시로만 결제하고 결제액의 일정 비율이 메이플크레딧으로 적립됩니다. 크레딧샵 상품은 보유·적립 크레딧으로만 결제하며 추가 적립은 없습니다.
+        두 화폐의 잔액과 상품별 구매 한도를 결제 전에 확인하고, 메소마켓은 1억 단위의 별도 구매 후보로 계산합니다.<br><br>
         작은 문제는 모든 구매 조합을 탐색합니다. 계산량이 많으면 후보를 줄여 추천안을 찾으며, 이 경우 결과에 <b>최적해 미보장</b>을 표시합니다.
-        구매 순서는 결제 후 적립금을 수령하는 기준입니다. 연속된 같은 구매는 한 줄로 합쳐 표시하지만, 결제는 1개씩 진행하세요.<br><br>
+        크레딧 구매는 어떤 캐시 구매도 열어 주지 않으므로, 계획은 항상 <b>캐시 결제를 모두 마친 뒤</b> 크레딧샵 구매로 실행할 수 있습니다.<br><br>
         회수율 = 예상 회수 현금 ÷ (사용 캐시 × 충전 비율). 보유 캐시도 같은 비율로 원가에 포함합니다.
-        마일리지의 별도 취득 원가와 가격 변동은 반영하지 않습니다.
+        이미 보유한 크레딧의 취득 원가와 가격 변동은 반영하지 않습니다.
       </div>
     </details>
   </div>
@@ -283,12 +338,11 @@
       <div class="scroll">
         <table class="plan">
           <thead><tr>
-            <th style="width:23%">아이템</th>
-            <th>마일리지 구매</th>
-            <th>캐시 전액 구매</th>
+            <th style="width:26%">아이템</th>
+            <th>결제 수단</th>
             <th>총 수량</th>
             <th>사용 캐시</th>
-            <th>사용 마일리지</th>
+            <th>사용 크레딧</th>
             <th>획득 메소</th>
             <th>회수 현금</th>
           </tr></thead>
@@ -298,19 +352,21 @@
     </div>
     <div class="card">
       <h2>구매 순서</h2>
-      <p>표의 순서대로 1개씩 결제하세요. 재사용 모드에서는 매 구매 후 적립금을 수령한 뒤 다음 구매를 진행하세요.</p>
-      <div class="scroll"><table><thead><tr><th>순서</th><th>아이템</th><th>결제 방식</th><th>반복 수량</th><th>적립 P</th><th>남은 캐시</th><th>사용 가능한 P</th></tr></thead><tbody id="sequenceRows"></tbody></table></div>
+      <p>표의 순서대로 결제하세요. 크레딧샵 구매는 캐시 결제로 적립된 크레딧이 들어온 뒤에 진행합니다.</p>
+      <div class="scroll"><table><thead><tr><th>순서</th><th>아이템</th><th>결제 방식</th><th>반복 수량</th><th>적립 C</th><th>남은 캐시</th><th>남은 크레딧</th></tr></thead><tbody id="sequenceRows"></tbody></table></div>
     </div>
   </div>
 
   <div class="foot">
-    <b>규칙 확인일: 2026-09-15.</b> <a href="https://maplestory.nexon.com/testworld/news/update/199?page=1" target="_blank" rel="noopener noreferrer">공식 테스트월드 공지</a>에는 9/17 구매 적립금 개편이 예고되어 있습니다. 정식 적용 여부를 확인하고, 마일리지 신규 적립이 중단되면 적립률을 0%로 설정하세요. 메이플크레딧 가치는 이 계산에 포함하지 않습니다.<br>
-    <a href="https://gi.maplestory.nexon.com/Guide/System/Mileage" target="_blank" rel="noopener noreferrer">마일리지 안내</a> · <a href="https://maplestory.nexon.com/Guide/N23GameInformation/Articles/425" target="_blank" rel="noopener noreferrer">MVP 안내</a><br>
-    시세·수수료는 직접 확인한 값을 넣어야 결과가 맞습니다. 기본값은 예시입니다.<br>
+    <b>규칙 확인일: 2026-09-18.</b> <a href="https://maplestory.nexon.com/news/update/813" target="_blank" rel="noopener noreferrer">공식 개편 공지</a> 기준으로 넥슨캐시 결제액의 5%가 메이플크레딧으로 적립되고 크레딧샵에서만 사용합니다. 적립일로부터 1년의 유효기간이 있으며, 상품가 30% 마일리지 병용 결제는 폐지됐습니다. 기존 마일리지 잔액은 2026-11-19 점검 후 소멸하므로 이 계산기에서 사용하지 않습니다.<br>
+    <a href="https://gi.maplestory.nexon.com/Guide/System/Mileage" target="_blank" rel="noopener noreferrer">적립 안내</a> · <a href="https://maplestory.nexon.com/Guide/N23GameInformation/Articles/425" target="_blank" rel="noopener noreferrer">MVP 안내</a><br>
+    시세·수수료는 직접 확인한 값을 넣어야 결과가 맞습니다. 기본값은 예시입니다. 크레딧샵 상품의 월 구매 한도는 상품별로 직접 확인하세요.<br>
     메포를 캐시와 같은 충전 비율로 얻는다고 가정합니다. 전환 조건이 다르면 메소마켓 시세를 실효 캐시 기준으로 환산해 넣으세요.
   </div>
 </div>
 
+<script src="optimizer.js" defer></script>
+<script src="cash-shop.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>
