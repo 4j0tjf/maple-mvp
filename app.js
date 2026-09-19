@@ -242,9 +242,9 @@ function applyCashShop(data) {
     (thin.length ? ` · 최근 거래 부족으로 ${thin.length}개 제외` : '') +
     (data.depthPolicy ? ` · 최근 ${data.depthPolicy.windowDays}일 ${data.depthPolicy.minRecentSales}건 미만 제외` : '');
   $('#creditShopStatus').textContent = data.creditCatalogError ? data.creditCatalogError
-    : screening ? `크레딧샵 ${screening.month} 효율 확정 · 전체 ${screening.entries.length}종 중 상위 ${screening.keptCount}종만 이번 달 검색합니다.`
-    : data.creditCatalogCount ? `크레딧샵 ${data.creditCatalogCount}종 등록 · 이번 달 효율 순위가 아직 확정되지 않았습니다. 다음 수집에서 전 상품을 조회합니다.`
-    : '등록된 크레딧샵 상품이 없습니다. 관리자 화면에서 목록을 넣으면 매월 1회 전수 조회 후 상위 절반만 추적합니다.';
+    : screening ? `크레딧샵 ${screening.day} 효율 확정 · 전체 ${screening.entries.length}종 중 상위 ${screening.keptCount}종이 오늘 구매 대상입니다.`
+    : data.creditCatalogCount ? `크레딧샵 ${data.creditCatalogCount}종 등록 · 오늘 효율 순위가 아직 확정되지 않았습니다. 다음 수집에서 전 상품을 조회합니다.`
+    : '등록된 크레딧샵 상품이 없습니다. 관리자 화면에서 목록을 넣으면 매일 1회 전수 조회 후 상위 절반을 구매 대상으로 추립니다.';
   const excluded = (screening?.entries || []).filter(e => !e.kept);
   $('#creditExcluded').replaceChildren();
   excluded.forEach(e => { const li = document.createElement('li'); li.textContent = `${e.name} · ${e.creditPrice.toLocaleString('ko-KR')} 크레딧 · ${e.reason}`; $('#creditExcluded').appendChild(li); });
