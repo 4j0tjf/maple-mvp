@@ -386,19 +386,26 @@ function renderPlan(r, { cands, s, totalCash }) {
       '<td>' + comma(l.meso) + '</td><td>' + comma(mesoToWon(l.meso, s)) + '원</td></tr>';
   }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--mute);padding:20px">구매할 수 있는 조합이 없습니다</td></tr>';
 
+  // 이번 계산에서만 해당하는 사실. 매번 달라지므로 펼쳐 둔다.
   const n = [];
-  n.push([r.exact ? 'ok' : '', r.exact ? '입력한 규칙·수량 한도에서 <b>획득 메소 최대 조합</b>을 확인했습니다.' : '계산량 제한 안에서 찾은 <b>추천 조합</b>입니다. 더 좋은 조합이 존재할 수 있습니다.']);
-  n.push(['', '회수율은 <b>사용한 보유 캐시까지 포함한 환산 원가</b> 기준입니다. 실제 충전 예산은 ' + comma(s.chargeWon) + '원이며, 잔여 캐시는 회수 현금에 포함하지 않습니다. MVP 인정액은 상품·전환 조건을 별도로 확인해야 합니다.']);
-  if (Number.isFinite(base) && s.useMarket) n.push(['', '메소마켓의 단위 회수율은 <b>' + fx(base,2) + '%</b>입니다. 수량 한도와 잔액을 고려한 전체 계획의 비교 결과는 아닙니다.']);
-  n.push(['', '<b>캐시 결제를 모두 마친 뒤</b> 적립된 크레딧으로 크레딧샵에서 구매하세요. 크레딧은 상품 가격을 대신 낼 수 없고 크레딧샵에서만 사용합니다.']);
   if (r.usedCredit > 0) n.push(['', '이 계획은 크레딧 <b>' + comma(r.usedCredit) + 'C</b>를 사용합니다. 보유 크레딧 ' + comma(s.ownCredit) + 'C와 적립분 ' + comma(r.earned) + 'C의 합 안에서만 구매할 수 있습니다.']);
   if (r.leftCredit > 0) n.push(['', '구매 후 남는 크레딧: <b>' + comma(r.leftCredit) + 'C</b>. 적립일로부터 1년 안에 크레딧샵에서 사용하세요.']);
   if (r.leftCash > 0) n.push(['', '남는 캐시: <b>' + comma(r.leftCash) + '</b>. 최대 회수액과 별개로 MVP 목표 금액만큼 소비했는지 확인하세요.']);
   if (skipped.length) n.push(['', '이번 조합에서 미구매: <b>' + skipped.map(l=>esc(l.name)).join(', ') + '</b>.']);
   const top = sorted.find(l=>!l.mm);
   if (top && top.qty > 5 && top.meso/r.meso > .7) n.push(['', '<b>' + esc(top.name) + '</b> ' + comma(top.qty) + '개를 입력한 시세에 판매할 수 있는지 확인하고, 판매 가능량을 최대 수량에 반영하세요.']);
+
+  // 계산할 때마다 같은 내용. 결과를 가리지 않게 접어 둔다.
+  // 최적해 여부는 버튼 아래 상태줄에도 같은 문장으로 나오므로 여기서는 접어도 잃는 정보가 없다.
+  const fixed = [];
+  fixed.push([r.exact ? 'ok' : '', r.exact ? '입력한 규칙·수량 한도에서 <b>획득 메소 최대 조합</b>을 확인했습니다.' : '계산량 제한 안에서 찾은 <b>추천 조합</b>입니다. 더 좋은 조합이 존재할 수 있습니다.']);
+  fixed.push(['', '회수율은 <b>사용한 보유 캐시까지 포함한 환산 원가</b> 기준입니다. 실제 충전 예산은 ' + comma(s.chargeWon) + '원이며, 잔여 캐시는 회수 현금에 포함하지 않습니다. MVP 인정액은 상품·전환 조건을 별도로 확인해야 합니다.']);
+  if (Number.isFinite(base) && s.useMarket) fixed.push(['', '메소마켓의 단위 회수율은 <b>' + fx(base,2) + '%</b>입니다. 수량 한도와 잔액을 고려한 전체 계획의 비교 결과는 아닙니다.']);
+  fixed.push(['', '<b>캐시 결제를 모두 마친 뒤</b> 적립된 크레딧으로 크레딧샵에서 구매하세요. 크레딧은 상품 가격을 대신 낼 수 없고 크레딧샵에서만 사용합니다.']);
   $('#sequenceRows').innerHTML = r.steps.map((step,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(cands[step.i].name)+'</td><td>'+ (step.kind==='credit'?'크레딧샵 결제':'캐시 결제') +'</td><td>'+comma(step.qty)+'</td><td>'+comma(step.reward)+'</td><td>'+comma(step.cashAfter)+'</td><td>'+comma(step.creditAfter)+'</td></tr>').join('');
-  $('#notes').innerHTML = n.map(([c, t]) => '<div class="note ' + c + '">' + t + '</div>').join('');
+  const asNotes = list => list.map(([c, t]) => '<div class="note ' + c + '">' + t + '</div>').join('');
+  $('#notes').innerHTML = asNotes(n);
+  $('#fixedNotes').innerHTML = asNotes(fixed);
 
   $('#result').style.display = 'block';
 }
@@ -581,7 +588,7 @@ document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.ke
 
 (async () => {
   // 옛 HTML이 캐시돼 새 요소가 없으면 조용히 죽는 대신 원인을 알린다.
-  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','modeCompare'].filter(id => !$('#'+id));
+  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','modeCompare','fixedNotes'].filter(id => !$('#'+id));
   if (missing.length) {
     document.body.insertAdjacentHTML('afterbegin',
       '<div class="note bad" style="margin:12px">이전 버전 화면이 캐시돼 있습니다. 새로고침(Ctrl+Shift+R) 후 다시 열어주세요.</div>');
