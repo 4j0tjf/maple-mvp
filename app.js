@@ -229,7 +229,7 @@ function applyCashShop(data) {
     pricePlaceholder:failed ? '시세 수집 실패' : '시세 미수집',
   }));
   creditRows.forEach(r => addCreditRow({...r, cap:previous.get(r.cashShopId) ?? r.cap ?? '',
-    rowStatus: [r.metadataPending ? '크레딧 가격 확인 필요' : '이번 달 검색 대상', ...priceStatus(r), r.depth && typeof r.depth.sellable === 'number' ? '최근 ' + r.depth.sellable.toLocaleString('ko-KR') + '건 거래' : ''].filter(Boolean).join(' · '),
+    rowStatus: [r.metadataPending ? '크레딧 가격 확인 필요' : '오늘 구매 대상', ...priceStatus(r), r.depth && typeof r.depth.sellable === 'number' ? '최근 ' + r.depth.sellable.toLocaleString('ko-KR') + '건 거래' : ''].filter(Boolean).join(' · '),
     pricePlaceholder:failed ? '시세 수집 실패' : '시세 미수집',
   }));
   refresh();
@@ -488,12 +488,18 @@ $('#bImport').onclick = () => {
   f.click();
 };
 $('#bCalc').onclick = calculate;
-if (['localhost','127.0.0.1'].includes(location.hostname)) {
+// maple-market이 /mvp로 서빙할 때만 사이트 내비게이션과 시세 자동 반영을 켠다.
+// 정적 배포본(단독 index.html)에는 다른 페이지도 /api/cash-shop도 없다.
+//
+// 예전에는 hostname이 localhost인지로 판단했다. 그래서 같은 서버를 공인 도메인이나
+// LAN 주소로 열면 캐시템·크레딧샵 목록이 통째로 비어 보였다. 판단 기준은 호스트가
+// 아니라 이 페이지를 maple-market이 서빙하는지다.
+const servedByMarket = location.pathname.startsWith('/mvp');
+if (servedByMarket) $('#siteNav').hidden = false;
+if (servedByMarket || ['localhost','127.0.0.1'].includes(location.hostname)) {
   $('#cashShopControls').hidden = false;
   $('#autoCashShop').checked = true;
 }
-// maple-market이 /mvp로 서빙할 때만 사이트 내비게이션을 보여준다. 정적 배포본에는 다른 페이지가 없다.
-if (location.pathname.startsWith('/mvp')) $('#siteNav').hidden = false;
 $('#autoCashShop').addEventListener('change', refresh);
 [...SET_IDS, ...CHK_IDS].forEach(id => $('#'+id).addEventListener('input', refresh));
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') calculate(); });
