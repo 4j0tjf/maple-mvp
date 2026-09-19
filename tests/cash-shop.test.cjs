@@ -2,14 +2,41 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {fetchToday,productRows,creditRows,thin,readToday,fixedProducts}=require('../cash-shop.js');
 test('cached day returns without triggering repeated search',async()=>{
+  // 오늘 결과가 이미 있으면 수집을 시작하지 않는다. 읽기 한 번으로 끝난다.
   const methods=[];const result=await fetchToday({fetcher:async(_url,opts)=>{methods.push(opts.method);return {ok:true,json:async()=>({status:'SUCCESS',products:[]})};}});
-  assert.equal(result.status,'SUCCESS');assert.deepEqual(methods,['POST']);
+  assert.equal(result.status,'SUCCESS');assert.deepEqual(methods,['GET']);
 });
 test('running job is polled read-only and failed day is not retried',async()=>{
   const methods=[];const responses=['RUNNING','RUNNING','FAIL'];
   const result=await fetchToday({fetcher:async(_url,opts)=>{methods.push(opts.method);return {ok:true,json:async()=>({status:responses.shift(),products:fixedProducts})};},wait:async()=>{}});
   assert.equal(result.status,'FAIL');assert.equal(productRows(result.products).length,4);
-  assert.deepEqual(methods,['POST','GET','GET']);
+  assert.deepEqual(methods,['GET','GET','GET']);
+});
+test('오늘 수집이 없을 때만 시작을 요청한다',async()=>{
+  const methods=[];const responses=['NOT_REQUESTED','RUNNING','SUCCESS'];
+  const result=await fetchToday({fetcher:async(_url,opts)=>{methods.push(opts.method);return {ok:true,json:async()=>({status:responses.shift(),products:[]})};},wait:async()=>{}});
+  assert.equal(result.status,'SUCCESS');
+  // 읽고 -> 없으니 시작 요청 -> 끝날 때까지 읽기
+  assert.deepEqual(methods,['GET','POST','GET']);
+});
+test('외부에서 수집이 막혀도 저장된 오늘 결과로 계산한다',async()=>{
+  // 터널로 열면 서버가 POST를 403으로 막는다. 이미 오늘 결과가 있으면 POST 자체를 하지 않는다.
+  const methods=[];
+  const result=await fetchToday({fetcher:async(_url,opts)=>{
+    methods.push(opts.method);
+    if(opts.method==='POST') return {ok:false,status:403,json:async()=>({error:'외부에서는 오늘 시세 수집을 시작할 수 없습니다.'})};
+    return {ok:true,json:async()=>({status:'PARTIAL',products:fixedProducts})};
+  }});
+  assert.equal(result.status,'PARTIAL');
+  assert.deepEqual(methods,['GET']);
+});
+test('오늘 결과가 없는데 외부라 수집도 못 하면 이유를 그대로 알린다',async()=>{
+  await assert.rejects(
+    fetchToday({fetcher:async(_url,opts)=>opts.method==='POST'
+      ? {ok:false,status:403,json:async()=>({error:'외부에서는 오늘 시세 수집을 시작할 수 없습니다.'})}
+      : {ok:true,json:async()=>({status:'NOT_REQUESTED',products:[]})},wait:async()=>{}}),
+    /외부에서는 오늘 시세 수집을 시작할 수 없습니다/,
+  );
 });
 test('no-listing never becomes a zero price and missing purchase metadata stays pending',()=>{
   const p={id:'fixed-0',name:'테스트',variants:[{}],price:'100',cashPrice:null,creditEarns:null,comparisonComplete:true};
