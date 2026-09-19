@@ -308,7 +308,7 @@ async function calculate(){
   } catch(error) { showError(error.message); return; }
   finally { $('#bCalc').disabled = false; }
   if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
-  lastRun = { results, s, totalCash };
+  lastRun = { results, s };
   renderMode(activeMode);
   $('#result').scrollIntoView({ behavior:'smooth', block:'start' });
 }
@@ -347,7 +347,7 @@ function renderMode(mode) {
   renderPlan(lastRun.results[mode], lastRun);
 }
 
-function renderPlan(r, { s, totalCash }) {
+function renderPlan(r, { s }) {
   $('#calcStatus').textContent = r.exact ? '입력한 조건에서 최대 메소 조합을 확인했습니다.' : '탐색 범위에서 찾은 추천 조합입니다. 전역 최적해는 보장하지 않습니다.';
 
   const chargeUsed = Math.max(0, r.usedCash - s.ownCash);
@@ -358,17 +358,25 @@ function renderPlan(r, { s, totalCash }) {
   const profit = gotWon - spentWon;
   const base = baseline(s);
 
+  /*
+   * 결론부터 놓고, 같은 값을 두 번 적지 않는다.
+   *
+   * 뺀 것과 이유:
+   *   총 가용 캐시        전역 설정의 입력을 되풀이한 값이라 결과가 아니다.
+   *   사용 넥슨캐시       사용 원가와 같은 양을 캐시 단위로 쓴 것이다. 원가 타일에 함께 적는다.
+   *   필요 추가 충전액    보유 캐시를 쓰지 않으면 사용 원가와 늘 같은 값이다.
+   *                       실제로 보유 캐시를 쓴 계획에서만 따로 보여준다.
+   */
   $('#sumBox').innerHTML = [
-    ['총 가용 캐시', comma(totalCash), '캐시', ''],
-    ['적립 크레딧', '+' + comma(r.earned), 'C', 'c-grn'],
-    ['사용 크레딧', comma(r.usedCredit), 'C', 'c-grn'],
-    ['사용 캐시 환산 원가', comma(spentWon), '원', 'c-blue'],
-    ['사용 넥슨캐시·환산액', comma(r.usedCash), '캐시', 'c-blue'],
-    ['필요 추가 충전액', comma(newChargeWon), '원', ''],
-    ['총 획득 메소', comma(r.meso), '', 'c-org'],
-    ['회수 현금', comma(gotWon), '원', 'c-org'],
     ['최종 회수율', fx(rate, 2), '%', rate >= 100 ? 'c-grn' : 'c-red'],
-    ['환산 손익', (profit >= 0 ? '+' : '') + comma(profit), '원', profit >= 0 ? 'c-grn' : 'c-red']
+    ['환산 손익', (profit >= 0 ? '+' : '') + comma(profit), '원', profit >= 0 ? 'c-grn' : 'c-red'],
+    ['회수 현금', comma(gotWon), '원', 'c-org'],
+    ['총 획득 메소', comma(r.meso), '', 'c-org'],
+    ['사용 캐시', comma(r.usedCash), '캐시 · 원가 ' + comma(spentWon) + '원', 'c-blue'],
+    // 보유 캐시를 실제로 쓴 계획에서만. 아니면 위 원가와 같은 숫자가 한 번 더 나온다.
+    ...(newChargeWon !== spentWon ? [['필요 추가 충전액', comma(newChargeWon), '원', '']] : []),
+    ...(r.earned > 0 ? [['적립 크레딧', '+' + comma(r.earned), 'C', 'c-grn']] : []),
+    ...(r.usedCredit > 0 ? [['사용 크레딧', comma(r.usedCredit), 'C', 'c-grn']] : []),
   ].map(([k, n, u, c]) =>
     '<div><div class="k">' + k + '</div><div class="n ' + c + '">' + n + (u ? '<small>' + u + '</small>' : '') + '</div></div>'
   ).join('');
