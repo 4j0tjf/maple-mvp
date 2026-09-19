@@ -36,7 +36,7 @@ function bindNum(el, live = false){
 }
 ['chargeWon','ownCash','ownCredit','mesoPrice','mesoMarket','marketCap'].forEach(id => bindNum($('#'+id)));
 
-const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap'];
+const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap','sellShare'];
 const CHK_IDS = ['useMarket','marketEarn'];
 
 function settings(){
@@ -53,7 +53,9 @@ function settings(){
     marketCap: $('#marketCap').value.trim() === '' ? Infinity : num($('#marketCap').value),
     useMarket: $('#useMarket').checked,
     marketEarn: $('#marketEarn').checked,
-    earnCap: $('#earnCap').value.trim() === '' ? Infinity : num($('#earnCap').value)
+    earnCap: $('#earnCap').value.trim() === '' ? Infinity : num($('#earnCap').value),
+    // 최근 7일 거래량 중 내가 차지할 수 있다고 보는 몫. 판매량 고려 모드에서만 쓴다.
+    sellShare: num($('#sellShare').value) / 100
   };
 }
 
@@ -82,6 +84,8 @@ function autoNote(tr, d){
   if (!d.cashShopId) return;
   tr.dataset.cashShopId = d.cashShopId;
   tr.dataset.metadataPending = d.metadataPending === false ? 'false' : 'true';
+  // 판매량 고려 모드가 쓰는 값. 칸에 넣지 않고 행에 붙여 둔다.
+  if (d.depth && typeof d.depth.sellable === 'number') tr.dataset.sellable = String(d.depth.sellable);
   const note = document.createElement('small'); note.className = 'f-auto-status';
   note.style.display = 'block'; note.style.fontSize = '13px';
   note.textContent = d.rowStatus || '자동 상품'; tr.cells[0].appendChild(note);
@@ -147,6 +151,7 @@ const readRows = () => [...$('#rows').children].map(tr => ({
   c:    num(tr.querySelector('.f-cash').value),
   gross:num(tr.querySelector('.f-meso').value),
   cap:  tr.querySelector('.f-cap').value.trim() === '' ? Infinity : num(tr.querySelector('.f-cap').value),
+  sellable: tr.dataset.sellable ? Number(tr.dataset.sellable) : null,
   earn: tr.querySelector('.f-earn').checked,
   ready: !tr.dataset.cashShopId || (tr.dataset.metadataPending === 'false' && num(tr.querySelector('.f-cash').value)>0 && num(tr.querySelector('.f-meso').value)>0)
 }));
@@ -156,6 +161,7 @@ const readCreditRows = () => [...$('#creditRows').children].map(tr => ({
   k:    num(tr.querySelector('.f-credit').value),
   gross:num(tr.querySelector('.f-meso').value),
   cap:  tr.querySelector('.f-cap').value.trim() === '' ? Infinity : num(tr.querySelector('.f-cap').value),
+  sellable: tr.dataset.sellable ? Number(tr.dataset.sellable) : null,
   ready: !tr.dataset.cashShopId || (tr.dataset.metadataPending === 'false' && num(tr.querySelector('.f-credit').value)>0 && num(tr.querySelector('.f-meso').value)>0)
 }));
 
@@ -233,6 +239,10 @@ function applyCashShop(data) {
     pricePlaceholder:failed ? '시세 수집 실패' : '시세 미수집',
   }));
   refresh();
+  if (data.depthPolicy) {
+    if (typeof data.depthPolicy.minRecentSales === 'number') depthMin = data.depthPolicy.minRecentSales;
+    if (typeof data.depthPolicy.windowDays === 'number') depthWindow = data.depthPolicy.windowDays;
+  }
   const ready = rows.filter(r => !r.metadataPending && r.meso);
   const screening = data.creditScreening;
   $('#cashShopStatus').textContent = `${rows.length}개 상품 등록 · 계산 가능 ${ready.length}개` +
@@ -276,23 +286,69 @@ async function calculate(){
     rawCredit = readCreditRows().filter(it => it.ready && it.k > 0 && it.gross > 0);
   }
   catch(error) { showError(error.message); return; }
-  const cashCands = raw.map(it => ({ name:it.name, mm:false, kind:'cash', earn:it.earn, c:it.c, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap }));
-  if (s.useMarket) cashCands.push({ name:'메소마켓 (메포 → 1억 메소)', mm:true, kind:'cash', earn:s.marketEarn, c:s.mesoMarket, m:1e8, cap:s.marketCap });
-  const creditCands = rawCredit.map(it => ({ name:it.name, mm:false, kind:'credit', k:it.k, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap }));
+  const cashCands = raw.map(it => ({ name:it.name, mm:false, kind:'cash', earn:it.earn, c:it.c, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap, sellable:it.sellable }));
+  if (s.useMarket) cashCands.push({ name:'메소마켓 (메포 → 1억 메소)', mm:true, kind:'cash', earn:s.marketEarn, c:s.mesoMarket, m:1e8, cap:s.marketCap, sellable:null });
+  const creditCands = rawCredit.map(it => ({ name:it.name, mm:false, kind:'credit', k:it.k, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap, sellable:it.sellable }));
   if (!cashCands.length && !creditCands.length) { showError('아이템을 입력하거나 메소마켓을 활성화하세요.'); return; }
   const cands = [...cashCands, ...creditCands];
   const chargeCash = Math.floor(s.chargeWon/s.r);
   const totalCash = s.ownCash + chargeCash;
   const version = inputVersion;
-  let r;
+  let results;
   try {
     $('#calcStatus').textContent = '구매 가능한 조합과 순서를 계산하고 있습니다…';
     $('#bCalc').disabled = true;
-    r = await runOptimizer({items:cashCands,creditItems:creditCands,cash:totalCash,credit:s.ownCredit,
-      earn:s.earn,minEarnCash:s.minEarnCash,earnCap:s.earnCap});
+    const shared = { cash:totalCash, credit:s.ownCredit, earn:s.earn, minEarnCash:s.minEarnCash, earnCap:s.earnCap };
+    // 1. 최고 효율 — 입력한 한도만 지키고 거래량으로는 수량을 묶지 않는다.
+    const efficiency = await runOptimizer({ ...shared, items:cashCands, creditItems:creditCands });
+    if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
+    // 2. 판매량 고려 — 7일 거래량 중 판매 점유율만큼만 실제로 팔 수 있다고 본다.
+    $('#calcStatus').textContent = '판매량을 반영한 조합을 계산하고 있습니다…';
+    const volume = await runOptimizer({ ...shared, items:cashCands.map(capBySales(s)), creditItems:creditCands.map(capBySales(s)) });
+    results = { efficiency, volume };
   } catch(error) { showError(error.message); return; }
   finally { $('#bCalc').disabled = false; }
   if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
+  lastRun = { results, cands, s, totalCash };
+  renderMode(activeMode);
+  $('#result').scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+/** 두 모드의 결과를 나란히 비교한다. 탭을 바꾸지 않아도 차이를 볼 수 있게 한다. */
+function renderCompare({ results, s }) {
+  const won = r => mesoToWon(r.meso, s);
+  const rate = r => { const spent = r.usedCash * s.r; return spent > 0 ? won(r) / spent * 100 : NaN; };
+  const gap = won(results.volume) - won(results.efficiency);
+  $('#modeCompare').innerHTML = [
+    ['최고 효율 · 회수율', fx(rate(results.efficiency), 2), '%', ''],
+    ['최고 효율 · 회수 현금', comma(won(results.efficiency)), '원', ''],
+    ['판매량 고려 · 회수율', fx(rate(results.volume), 2), '%', ''],
+    ['판매량 고려 · 회수 현금', comma(won(results.volume)), '원', ''],
+    ['차이', (gap >= 0 ? '+' : '') + comma(gap), '원', gap >= 0 ? 'c-grn' : 'c-red'],
+  ].map(([k, n, u, c]) =>
+    '<div><div class="k">' + k + '</div><div class="n ' + c + '">' + n + (u ? '<small>' + u + '</small>' : '') + '</div></div>'
+  ).join('');
+  $('#modeNote').innerHTML = activeMode === 'efficiency'
+    ? '<b>최고 효율</b>: 메소/캐시 효율만 봅니다. 최근 ' + depthWindow + '일 거래 ' + comma(depthMin)
+      + '건 미만 상품은 두 모드 모두에서 제외하지만, 이 모드는 수량을 거래량으로 묶지 않고 입력한 한도까지 삽니다.'
+      + ' 실제로 그만큼 팔 수 있는지는 직접 확인해야 합니다.'
+    : '<b>판매량 고려</b>: 최근 ' + depthWindow + '일 거래량의 <b>' + fx(s.sellShare * 100, 0)
+      + '%</b>까지만 내가 팔 수 있다고 보고 수량을 제한합니다. 거래가 많은 상품일수록 더 살 수 있습니다.';
+}
+
+/** 탭에 맞는 결과를 아래 카드들에 그린다. 계산은 이미 끝나 있어 즉시 바뀐다. */
+function renderMode(mode) {
+  activeMode = mode;
+  $('#tabEfficiency').classList.toggle('on', mode === 'efficiency');
+  $('#tabVolume').classList.toggle('on', mode === 'volume');
+  $('#tabEfficiency').setAttribute('aria-selected', String(mode === 'efficiency'));
+  $('#tabVolume').setAttribute('aria-selected', String(mode === 'volume'));
+  if (!lastRun) return;
+  renderCompare(lastRun);
+  renderPlan(lastRun.results[mode], lastRun);
+}
+
+function renderPlan(r, { cands, s, totalCash }) {
   $('#calcStatus').textContent = r.exact ? '입력한 조건에서 최대 메소 조합을 확인했습니다.' : '탐색 범위에서 찾은 추천 조합입니다. 전역 최적해는 보장하지 않습니다.';
 
   const chargeUsed = Math.max(0, r.usedCash - s.ownCash);
@@ -345,7 +401,6 @@ async function calculate(){
   $('#notes').innerHTML = n.map(([c, t]) => '<div class="note ' + c + '">' + t + '</div>').join('');
 
   $('#result').style.display = 'block';
-  $('#result').scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
 /* ===================== 저장 / 불러오기 ===================== */
@@ -385,6 +440,23 @@ function save(){ try { localStorage.setItem(SKEY,JSON.stringify(snapshot())); } 
 function load(){ try { const stored=localStorage.getItem(SKEY); if (stored) return restore(JSON.parse(stored)); } catch {} return false; }
 
 let activeWorker = null, rejectWorker = null, inputVersion = 0, loadingCashShop = false;
+/** 마지막 계산 결과 묶음. 탭을 바꿀 때 다시 계산하지 않고 이걸 다시 그린다. */
+let lastRun = null;
+let activeMode = 'efficiency';
+/** 서버의 거래량 정책. 안내 문구에만 쓰므로 못 받으면 기본값으로 둔다. */
+let depthMin = 100, depthWindow = 7;
+
+/**
+ * 판매량 고려 모드의 수량 상한.
+ *
+ * 최근 거래량 전부를 나 혼자 팔 수는 없다. 그중 '판매 점유율'만큼만 소화할 수 있다고 본다.
+ * 거래량을 모르는 항목(직접 입력한 상품, 메소마켓)은 묶지 않는다.
+ * 모르는 것과 안 팔리는 것은 다르다.
+ */
+const capBySales = s => it =>
+  typeof it.sellable === 'number' && Number.isFinite(it.sellable)
+    ? { ...it, cap: Math.min(it.cap, Math.max(0, Math.floor(it.sellable * s.sellShare))) }
+    : it;
 function showError(message) { $('#calcStatus').textContent = message; $('#result').style.display = 'none'; }
 function cancelCalculation() {
   if (activeWorker) { activeWorker.terminate(); activeWorker = null; rejectWorker?.(new Error('입력이 변경되어 계산을 취소했습니다.')); rejectWorker=null; }
@@ -431,6 +503,7 @@ function validateInputs() {
   check($('#earnRate'),'크레딧 적립률',{max:100});
   check($('#minEarnCash'),'적립 최소 결제액',{max:10000000,int:true});
   check($('#earnCap'),'추가 적립 한도',{max:10000000,int:true,blank:true});
+  check($('#sellShare'),'판매 점유율',{min:1,max:100});
   if($('#useMarket').checked) {
     check($('#mesoMarket'),'메소마켓 시세',{min:1,max:10000000,int:true});
     check($('#marketCap'),'메소마켓 한도',{max:10000000,int:true,blank:true});
@@ -500,13 +573,15 @@ if (servedByMarket || ['localhost','127.0.0.1'].includes(location.hostname)) {
   $('#cashShopControls').hidden = false;
   $('#autoCashShop').checked = true;
 }
+$('#tabEfficiency').addEventListener('click', () => renderMode('efficiency'));
+$('#tabVolume').addEventListener('click', () => renderMode('volume'));
 $('#autoCashShop').addEventListener('change', refresh);
 [...SET_IDS, ...CHK_IDS].forEach(id => $('#'+id).addEventListener('input', refresh));
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') calculate(); });
 
 (async () => {
   // 옛 HTML이 캐시돼 새 요소가 없으면 조용히 죽는 대신 원인을 알린다.
-  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc'].filter(id => !$('#'+id));
+  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','modeCompare'].filter(id => !$('#'+id));
   if (missing.length) {
     document.body.insertAdjacentHTML('afterbegin',
       '<div class="note bad" style="margin:12px">이전 버전 화면이 캐시돼 있습니다. 새로고침(Ctrl+Shift+R) 후 다시 열어주세요.</div>');

@@ -55,27 +55,32 @@ test('credit shop rows carry the credit price and monthly limit',()=>{
   assert.ok(rows.every(r=>r.metadataPending===false));
   assert.deepEqual(creditRows(undefined),[]);
 });
-test('거래가 적은 상품은 행을 만들지 않고 남은 상품은 거래량이 수량 상한이 된다',()=>{
+test('거래가 적은 상품은 행을 만들지 않고 거래량은 상한이 아니라 판정으로 실린다',()=>{
   const base={cashPrice:2200,creditEarns:true,price:'100000000',variants:[{}],comparisonComplete:true};
   const products=[
-    {...base,id:'a',name:'잘팔림',depth:{sellable:250,excluded:false,reason:'최근 거래 250건 · 최대 수량 250개로 제한'}},
+    {...base,id:'a',name:'잘팔림',depth:{sellable:250,excluded:false,reason:'최근 거래 250건'}},
     {...base,id:'b',name:'안팔림',depth:{sellable:12,excluded:true,reason:'최근 거래 12건 · 기준 100건 미만으로 제외'}},
     {...base,id:'c',name:'미확인',depth:{sellable:null,excluded:false,reason:'거래량 미확인 · 제외하지 않음'}},
   ];
   const rows=productRows(products);
   assert.deepEqual(rows.map(r=>r.name),['잘팔림','미확인']);
-  assert.equal(rows[0].cap,'250');
-  assert.equal(rows[1].cap,'');
+  // 최대 수량 칸은 비워 둔다. 채우면 '최고 효율' 계산까지 거래량에 묶인다.
+  assert.deepEqual(rows.map(r=>r.cap),['','']);
+  // 판매량 고려 모드가 쓰도록 판정만 실어 보낸다.
+  assert.equal(rows[0].depth.sellable,250);
+  assert.equal(rows[1].depth.sellable,null);
   assert.deepEqual(thin(products).map(t=>t.name),['안팔림']);
 });
-test('크레딧샵은 월 구매 한도와 거래량 중 작은 쪽을 상한으로 쓴다',()=>{
+test('크레딧샵 상한은 월 구매 한도만 쓴다',()=>{
   const base={creditPrice:10000,price:'450000000',variants:[{}],comparisonComplete:true};
   const rows=creditRows([
-    {...base,id:'x',name:'한도가 작음',monthlyLimit:5,depth:{sellable:250,excluded:false,reason:''}},
-    {...base,id:'y',name:'거래량이 작음',monthlyLimit:500,depth:{sellable:120,excluded:false,reason:''}},
-    {...base,id:'z',name:'둘 다 없음',monthlyLimit:null,depth:{sellable:null,excluded:false,reason:''}},
+    {...base,id:'x',name:'한도 있음',monthlyLimit:5,depth:{sellable:250,excluded:false,reason:''}},
+    {...base,id:'y',name:'한도가 거래량보다 큼',monthlyLimit:500,depth:{sellable:120,excluded:false,reason:''}},
+    {...base,id:'z',name:'한도 없음',monthlyLimit:null,depth:{sellable:null,excluded:false,reason:''}},
   ]);
-  assert.deepEqual(rows.map(r=>r.cap),['5','120','']);
+  // 월 구매 한도는 규칙이라 늘 적용된다. 거래량은 모드에 따라 달라지므로 여기서 섞지 않는다.
+  assert.deepEqual(rows.map(r=>r.cap),['5','500','']);
+  assert.deepEqual(rows.map(r=>r.depth && r.depth.sellable),[250,120,null]);
 });
 test('initial catalog read shows fixed products without triggering collection',async()=>{
   const methods=[];

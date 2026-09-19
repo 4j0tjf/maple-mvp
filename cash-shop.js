@@ -4,8 +4,13 @@
   }));
   // 공식 개편(2026-09-17): 결제액 5%가 메이플크레딧으로 적립되고 크레딧샵에서만 사용한다.
   const defaultPolicy = {earnRate:0.05, minCashForEarn:10};
-  // 서버가 붙인 거래량 판정. excluded면 계산에서 빼고, sellable이 있으면 최대 수량 기본값으로 쓴다.
-  const depthCap = p => p.depth && typeof p.depth.sellable === 'number' ? String(p.depth.sellable) : '';
+  // 서버가 붙인 거래량 판정. excluded면 계산에서 아예 뺀다.
+  //
+  // sellable은 '최대 수량' 칸에 미리 넣지 않는다. 계산이 두 가지이기 때문이다.
+  //   1. 최고 효율      — 거래량으로 수량을 묶지 않는다
+  //   2. 판매량 고려    — sellable × 판매 점유율을 상한으로 쓴다
+  // 칸에 넣어 버리면 1번까지 거래량에 묶인다. 판정은 row.depth로 그대로 넘겨
+  // 계산할 때 모드별로 쓴다. '최대 수량' 칸은 사용자가 직접 정하는 한도로 남긴다.
   const tradable = products => (products || []).filter(p => !(p.depth && p.depth.excluded));
   const thin = products => (products || []).filter(p => p.depth && p.depth.excluded)
     .map(p => ({ name: p.name, reason: p.depth.reason }));
@@ -14,7 +19,7 @@
       cashShopId: p.id,
       name: p.name + (p.variants.length > 1 && p.selected ? ' · ' + p.selected : ''),
       cash: p.cashPrice == null ? '' : String(p.cashPrice),
-      meso: p.price != null && /^\d+$/.test(p.price) && Number.isSafeInteger(Number(p.price)) && Number(p.price)>0 ? p.price : '', cap: depthCap(p),
+      meso: p.price != null && /^\d+$/.test(p.price) && Number.isSafeInteger(Number(p.price)) && Number(p.price)>0 ? p.price : '', cap: '',
       earn: p.creditEarns === true,
       depth: p.depth || null,
       metadataPending: p.cashPrice == null || p.creditEarns == null,
@@ -27,9 +32,8 @@
       name: p.name + (p.variants.length > 1 && p.selected ? ' · ' + p.selected : ''),
       credit: p.creditPrice == null ? '' : String(p.creditPrice),
       meso: p.price != null && /^\d+$/.test(p.price) && Number.isSafeInteger(Number(p.price)) && Number(p.price)>0 ? p.price : '',
-      // 월 구매 한도와 최근 거래량 중 작은 쪽이 실제 상한이다.
-      cap: [p.monthlyLimit, p.depth && p.depth.sellable].filter(v => typeof v === 'number').length
-        ? String(Math.min(...[p.monthlyLimit, p.depth && p.depth.sellable].filter(v => typeof v === 'number'))) : '',
+      // 월 구매 한도는 규칙이라 모드와 무관하게 늘 적용된다. 거래량 상한은 계산할 때 따로 건다.
+      cap: typeof p.monthlyLimit === 'number' ? String(p.monthlyLimit) : '',
       metadataPending: p.creditPrice == null,
       depth: p.depth || null,
       comparisonComplete: p.comparisonComplete,
