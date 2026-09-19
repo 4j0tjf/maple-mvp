@@ -374,7 +374,16 @@ function renderPlan(r, { s, totalCash }) {
   ).join('');
 
   const sorted = [...r.lines].filter(l => l.qty > 0).sort((a, b) => b.meso - a.meso);
-  const skipped = r.lines.filter(l => l.qty === 0);
+  /*
+   * 미구매 목록.
+   *
+   * 같은 상품이 캐시 후보와 크레딧샵 후보로 따로 잡히므로 줄 단위로 세면 이름이 두 번 나온다.
+   * 구분 표시도 없어 중복처럼 보였다. 이름으로 묶고, 한 쪽이라도 샀으면 그 이름은 뺀다.
+   * 일부만 산 상품은 이미 구매 계획 표에 있다.
+   */
+  const boughtNames = new Set(r.lines.filter(l => l.qty > 0).map(l => l.name));
+  const skipped = [...new Set(r.lines.filter(l => l.qty === 0).map(l => l.name))]
+    .filter(name => !boughtNames.has(name));
   $('#planRows').innerHTML = sorted.map(l => {
     const z = v => v > 0 ? comma(v) : '<span class="zero">0</span>';
     return '<tr' + (l.mm ? ' class="mm"' : '') + '>' +
@@ -390,7 +399,7 @@ function renderPlan(r, { s, totalCash }) {
   if (r.usedCredit > 0) n.push(['', '이 계획은 크레딧 <b>' + comma(r.usedCredit) + 'C</b>를 사용합니다. 보유 크레딧 ' + comma(s.ownCredit) + 'C와 적립분 ' + comma(r.earned) + 'C의 합 안에서만 구매할 수 있습니다.']);
   if (r.leftCredit > 0) n.push(['', '구매 후 남는 크레딧: <b>' + comma(r.leftCredit) + 'C</b>. 적립일로부터 1년 안에 크레딧샵에서 사용하세요.']);
   if (r.leftCash > 0) n.push(['', '남는 캐시: <b>' + comma(r.leftCash) + '</b>. 최대 회수액과 별개로 MVP 목표 금액만큼 소비했는지 확인하세요.']);
-  if (skipped.length) n.push(['', '이번 조합에서 미구매: <b>' + skipped.map(l=>esc(l.name)).join(', ') + '</b>.']);
+  if (skipped.length) n.push(['', '이번 조합에서 미구매 <b>' + skipped.length + '종</b>: ' + skipped.map(esc).join(', ') + '.']);
   const top = sorted.find(l=>!l.mm);
   if (top && top.qty > 5 && top.meso/r.meso > .7) n.push(['', '<b>' + esc(top.name) + '</b> ' + comma(top.qty) + '개를 입력한 시세에 판매할 수 있는지 확인하고, 판매 가능량을 최대 수량에 반영하세요.']);
 
