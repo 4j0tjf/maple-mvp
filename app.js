@@ -290,7 +290,6 @@ async function calculate(){
   if (s.useMarket) cashCands.push({ name:'메소마켓 (메포 → 1억 메소)', mm:true, kind:'cash', earn:s.marketEarn, c:s.mesoMarket, m:1e8, cap:s.marketCap, sellable:null });
   const creditCands = rawCredit.map(it => ({ name:it.name, mm:false, kind:'credit', k:it.k, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap, sellable:it.sellable }));
   if (!cashCands.length && !creditCands.length) { showError('아이템을 입력하거나 메소마켓을 활성화하세요.'); return; }
-  const cands = [...cashCands, ...creditCands];
   const chargeCash = Math.floor(s.chargeWon/s.r);
   const totalCash = s.ownCash + chargeCash;
   const version = inputVersion;
@@ -309,7 +308,7 @@ async function calculate(){
   } catch(error) { showError(error.message); return; }
   finally { $('#bCalc').disabled = false; }
   if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
-  lastRun = { results, cands, s, totalCash };
+  lastRun = { results, s, totalCash };
   renderMode(activeMode);
   $('#result').scrollIntoView({ behavior:'smooth', block:'start' });
 }
@@ -348,7 +347,7 @@ function renderMode(mode) {
   renderPlan(lastRun.results[mode], lastRun);
 }
 
-function renderPlan(r, { cands, s, totalCash }) {
+function renderPlan(r, { s, totalCash }) {
   $('#calcStatus').textContent = r.exact ? '입력한 조건에서 최대 메소 조합을 확인했습니다.' : '탐색 범위에서 찾은 추천 조합입니다. 전역 최적해는 보장하지 않습니다.';
 
   const chargeUsed = Math.max(0, r.usedCash - s.ownCash);
@@ -401,8 +400,9 @@ function renderPlan(r, { cands, s, totalCash }) {
   fixed.push([r.exact ? 'ok' : '', r.exact ? '입력한 규칙·수량 한도에서 <b>획득 메소 최대 조합</b>을 확인했습니다.' : '계산량 제한 안에서 찾은 <b>추천 조합</b>입니다. 더 좋은 조합이 존재할 수 있습니다.']);
   fixed.push(['', '회수율은 <b>사용한 보유 캐시까지 포함한 환산 원가</b> 기준입니다. 실제 충전 예산은 ' + comma(s.chargeWon) + '원이며, 잔여 캐시는 회수 현금에 포함하지 않습니다. MVP 인정액은 상품·전환 조건을 별도로 확인해야 합니다.']);
   if (Number.isFinite(base) && s.useMarket) fixed.push(['', '메소마켓의 단위 회수율은 <b>' + fx(base,2) + '%</b>입니다. 수량 한도와 잔액을 고려한 전체 계획의 비교 결과는 아닙니다.']);
+  // 순서는 늘 같다(캐시 전부 -> 크레딧샵). 표로 나열하지 않고 이 한 줄로 갈음한다.
+  // 이 순서로 항상 실행 가능하다는 것은 optimizer.js가 보장하고 테스트로 확인한다.
   fixed.push(['', '<b>캐시 결제를 모두 마친 뒤</b> 적립된 크레딧으로 크레딧샵에서 구매하세요. 크레딧은 상품 가격을 대신 낼 수 없고 크레딧샵에서만 사용합니다.']);
-  $('#sequenceRows').innerHTML = r.steps.map((step,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(cands[step.i].name)+'</td><td>'+ (step.kind==='credit'?'크레딧샵 결제':'캐시 결제') +'</td><td>'+comma(step.qty)+'</td><td>'+comma(step.reward)+'</td><td>'+comma(step.cashAfter)+'</td><td>'+comma(step.creditAfter)+'</td></tr>').join('');
   const asNotes = list => list.map(([c, t]) => '<div class="note ' + c + '">' + t + '</div>').join('');
   $('#notes').innerHTML = asNotes(n);
   $('#fixedNotes').innerHTML = asNotes(fixed);
