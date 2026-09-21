@@ -321,7 +321,9 @@ async function calculate(){
   } catch(error) { showError(error.message); return; }
   finally { $('#bCalc').disabled = false; }
   if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
-  lastRun = { results, s };
+  // 계획에 적힌 수량이 시장 대비 얼마나 큰지 보여주려면 거래량이 필요하다.
+  const volumes = new Map([...raw, ...rawCredit].filter(it => typeof it.sellable === 'number').map(it => [it.name, it.sellable]));
+  lastRun = { results, s, volumes };
   renderMode(activeMode);
   $('#result').scrollIntoView({ behavior:'smooth', block:'start' });
 }
@@ -360,7 +362,24 @@ function renderMode(mode) {
   renderPlan(lastRun.results[mode], lastRun);
 }
 
-function renderPlan(r, { s }) {
+/**
+ * 이 수량이 시장에서 어느 정도인지 한 줄로 알린다.
+ *
+ * 계산은 "이만큼 살 수 있다"까지만 말해 준다. 그 물량을 실제로 소화할 수 있는지는
+ * 사람이 판단해야 하는데, 주간 거래량과 견주지 않으면 판단할 근거가 없다.
+ * 500건 팔리는 상품의 100개는 주간 거래의 20%, 일평균으로 1.4일치다.
+ */
+function marketShare(name, qty, volumes) {
+  const volume = volumes.get(name);
+  if (!volume || qty <= 0) return '';
+  const share = (qty / volume) * 100;
+  const days = qty / (volume / 7);
+  const heavy = share >= 10;
+  return ' <small style="font-weight:400;color:' + (heavy ? 'var(--red)' : 'var(--mute)') + '">· 주간 거래의 '
+    + fx(share, share < 1 ? 1 : 0) + '% · 일평균 ' + fx(days, 1) + '일치</small>';
+}
+
+function renderPlan(r, { s, volumes }) {
   $('#calcStatus').textContent = r.exact ? '입력한 조건에서 최대 메소 조합을 확인했습니다.' : '탐색 범위에서 찾은 추천 조합입니다. 전역 최적해는 보장하지 않습니다.';
 
   const chargeUsed = Math.max(0, r.usedCash - s.ownCash);
@@ -408,7 +427,7 @@ function renderPlan(r, { s }) {
   $('#planRows').innerHTML = sorted.map(l => {
     const z = v => v > 0 ? comma(v) : '<span class="zero">0</span>';
     return '<tr' + (l.mm ? ' class="mm"' : '') + '>' +
-      '<td>' + esc(l.name) + (l.mm ? ' <small style="color:var(--mute);font-weight:400">· 1개 = 1억</small>' : '') + '</td>' +
+      '<td>' + esc(l.name) + (l.mm ? ' <small style="color:var(--mute);font-weight:400">· 1개 = 1억</small>' : marketShare(l.name, l.qty, volumes)) + '</td>' +
       '<td class="' + (l.kind === 'credit' ? 'mi' : 'ca') + '">' + (l.kind === 'credit' ? '크레딧샵' : '캐시') + '</td>' +
       '<td style="font-weight:700">' + z(l.qty) + '</td>' +
       '<td>' + comma(l.usedCash) + '</td><td>' + comma(l.usedCredit) + '</td>' +
@@ -421,8 +440,13 @@ function renderPlan(r, { s }) {
   if (r.leftCredit > 0) n.push(['', '구매 후 남는 크레딧: <b>' + comma(r.leftCredit) + 'C</b>. 적립일로부터 1년 안에 크레딧샵에서 사용하세요.']);
   if (r.leftCash > 0) n.push(['', '남는 캐시: <b>' + comma(r.leftCash) + '</b>. 최대 회수액과 별개로 MVP 목표 금액만큼 소비했는지 확인하세요.']);
   if (skipped.length) n.push(['', '이번 조합에서 미구매 <b>' + skipped.length + '종</b>: ' + skipped.map(esc).join(', ') + '.']);
-  const top = sorted.find(l=>!l.mm);
-  if (top && top.qty > 5 && top.meso/r.meso > .7) n.push(['', '<b>' + esc(top.name) + '</b> ' + comma(top.qty) + '개를 입력한 시세에 판매할 수 있는지 확인하고, 판매 가능량을 최대 수량에 반영하세요.']);
+  // 주간 거래량의 10%를 넘게 사는 계획은 따로 짚는다. 시장을 혼자 차지해야 가능한 물량이다.
+  const heavy = sorted.filter(l => !l.mm && volumes.get(l.name) && l.qty / volumes.get(l.name) >= 0.1);
+  if (heavy.length) {
+    n.push(['bad', '이 계획은 <b>' + heavy.map(l => esc(l.name) + ' ' + comma(l.qty) + '개(주간 거래의 '
+      + fx(l.qty / volumes.get(l.name) * 100, 0) + '%)').join(', ')
+      + '</b>를 팝니다. 그 기간 시장 물량의 상당 부분을 혼자 차지해야 가능한 양입니다. 물량 구간 폭을 줄이거나 최대 수량을 직접 지정하세요.']);
+  }
 
   // 계산할 때마다 같은 내용. 결과를 가리지 않게 접어 둔다.
   // 최적해 여부는 버튼 아래 상태줄에도 같은 문장으로 나오므로 여기서는 접어도 잃는 정보가 없다.
