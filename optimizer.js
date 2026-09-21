@@ -15,8 +15,10 @@
     if (!Number.isFinite(earn) || earn < 0 || earn > 1) throw new Error('적립률은 0~100%여야 합니다.');
     if (earnCap !== Infinity) integer(earnCap, '추가 적립 한도', 10000000);
     integer(minEarnCash, '적립 최소 결제액', 10000000);
-    if (!Array.isArray(items) || !Array.isArray(creditItems) || items.length > 30 || creditItems.length > 30 || items.length + creditItems.length > 40) {
-      throw new Error('캐시 상품과 크레딧샵 상품을 합쳐 최대 40개까지 계산할 수 있습니다.');
+    // 화면에 입력하는 상품은 표당 30개지만, '단가 하락 반영'은 상품 하나를 물량 구간으로
+    // 쪼개 여러 후보로 넣는다. 그래서 엔진 한도는 입력 한도보다 훨씬 커야 한다.
+    if (!Array.isArray(items) || !Array.isArray(creditItems) || items.length > 200 || creditItems.length > 200 || items.length + creditItems.length > 400) {
+      throw new Error('계산 후보가 너무 많습니다. 상품 수나 물량 구간을 줄여주세요.');
     }
     const entries = [
       ...items.map(it => ({ ...it, kind: 'cash', k: 0 })),
@@ -140,6 +142,60 @@
       usedCash: cash - best.cash, usedCredit: lines.reduce((n, l) => n + l.usedCredit, 0),
       leftCash: best.cash, leftCredit: best.credit };
   }
-  root.MvpOptimizer = { solve };
-  if (typeof module !== 'undefined') module.exports = { solve };
+/** 한 상품을 몇 구간까지 쪼갤지. 너무 잘게 나누면 후보만 늘고 결과는 거의 같다. */
+const TIER_MAX = 6;
+
+/**
+ * 물량이 늘수록 단가가 떨어지는 것을 구간으로 표현한다.
+ *
+ *   구간 폭   = floor(거래량 × 구간 폭)
+ *   구간 단가 = floor(기본 단가 × (1 - 하락률 × 구간번호))
+ *
+ * 구간마다 별도 후보로 넣으면 엔진이 비싼 구간부터 채우고, 한계 수익이 다른 상품보다
+ * 낮아지는 지점에서 스스로 멈춘다. 엔진은 손대지 않아도 된다.
+ *
+ * 하드 컷과 달리 "여기서부터는 못 판다"가 아니라 "여기서부터는 싸게 팔린다"로 본다.
+ * 거래량을 모르는 상품은 나누지 않는다. 모르는 것과 안 팔리는 것은 다르다.
+ *
+ * @param base 구간 이름 -> 원래 상품 이름. 결과를 다시 합칠 때 쓴다.
+ */
+function expandTiers(cands, s, base) {
+  return cands.flatMap(it => {
+    const volume = typeof it.sellable === 'number' && Number.isFinite(it.sellable) ? it.sellable : null;
+    const step = volume === null ? 0 : Math.floor(volume * s.tierWidth);
+    if (step < 1) return [it];
+    const out = [];
+    // 사용자가 적은 한도(크레딧샵은 월 구매 한도)는 구간에 나눠 준다. 합계가 한도를 넘지 않는다.
+    let left = it.cap;
+    for (let i = 0; i < TIER_MAX && left > 0; i += 1) {
+      const factor = 1 - s.tierDrop * i;
+      if (factor <= 0) break;
+      const cap = Math.min(step, left);
+      const name = i ? it.name + ' (' + Math.round(factor * 100) + '%가)' : it.name;
+      base.set(name, it.name);
+      out.push({ ...it, name, m: Math.floor(it.m * factor), cap });
+      if (Number.isFinite(left)) left -= cap;
+    }
+    return out.length ? out : [it];
+  });
+}
+
+/** 구간으로 쪼갠 결과를 원래 상품 단위로 다시 합친다. 화면에는 상품 하나로 보여야 한다. */
+function mergeTiers(result, base) {
+  if (!base.size) return result;
+  const merged = new Map();
+  for (const line of result.lines) {
+    const name = base.get(line.name) || line.name;
+    const key = name + '|' + line.kind;
+    const found = merged.get(key);
+    if (found) {
+      found.qty += line.qty; found.usedCash += line.usedCash;
+      found.usedCredit += line.usedCredit; found.meso += line.meso;
+    } else merged.set(key, { ...line, name });
+  }
+  return { ...result, lines: [...merged.values()] };
+}
+
+  root.MvpOptimizer = { solve, expandTiers, mergeTiers, TIER_MAX };
+  if (typeof module !== 'undefined') module.exports = { solve, expandTiers, mergeTiers, TIER_MAX };
 })(typeof self !== 'undefined' ? self : globalThis);

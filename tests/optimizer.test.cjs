@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {solve} = require('../optimizer');
+const {solve, expandTiers, mergeTiers} = require('../optimizer');
 const item=(c,m,extra={})=>({c,m,cap:Infinity,earn:true,...extra});
 const creditItem=(k,m,extra={})=>({k,m,cap:Infinity,...extra});
 const input=(items,extra={})=>({items,creditItems:[],cash:100,credit:0,earn:.05,minEarnCash:0,...extra});
@@ -130,4 +130,78 @@ test('실제 규모 입력은 제한된 탐색 안에서 실행 가능한 계획
 test('탐색을 절단하면 최적해를 주장하지 않는다',()=>{
   const p=input([item(6,13),item(5,10)],{creditItems:[creditItem(2,7)],cash:100,credit:30});
   const r=solve(p,{beamWidth:1,nodeLimit:1});assert.equal(r.exact,false);replay(p,r);
+});
+
+test('물량 구간은 거래량 폭만큼 끊고 단가를 단계별로 낮춘다', () => {
+  const base = new Map();
+  const [a, b, c] = expandTiers(
+    [{ name: '가', kind: 'cash', mm: false, c: 1000, k: 0, m: 1000000, cap: Infinity, sellable: 500 }],
+    { tierWidth: 0.1, tierDrop: 0.05 }, base,
+  );
+  // 500의 10% = 50개씩, 단가는 100% -> 95% -> 90%
+  assert.deepEqual([a.cap, b.cap, c.cap], [50, 50, 50]);
+  assert.deepEqual([a.m, b.m, c.m], [1000000, 950000, 900000]);
+  assert.equal(a.name, '가');
+  assert.equal(b.name, '가 (95%가)');
+  // 합칠 때 쓰도록 원래 이름을 기록해 둔다.
+  assert.equal(base.get('가 (95%가)'), '가');
+});
+
+test('거래량을 모르면 구간을 나누지 않는다', () => {
+  const base = new Map();
+  const item = { name: '메소마켓', kind: 'cash', mm: true, c: 1900, k: 0, m: 1e8, cap: Infinity, sellable: null };
+  assert.deepEqual(expandTiers([item], { tierWidth: 0.1, tierDrop: 0.05 }, base), [item]);
+  assert.equal(base.size, 0);
+  // 거래량이 너무 적어 한 구간이 1개도 안 되면 쪼개지 않는다.
+  assert.equal(expandTiers([{ ...item, sellable: 5 }], { tierWidth: 0.1, tierDrop: 0.05 }, base).length, 1);
+});
+
+test('입력한 한도는 구간에 나눠 주며 합계가 한도를 넘지 않는다', () => {
+  const base = new Map();
+  const tiers = expandTiers(
+    [{ name: '가', kind: 'credit', mm: false, c: 0, k: 100, m: 1000000, cap: 70, sellable: 500 }],
+    { tierWidth: 0.1, tierDrop: 0.05 }, base,
+  );
+  assert.deepEqual(tiers.map(t => t.cap), [50, 20]);
+  assert.equal(tiers.reduce((sum, t) => sum + t.cap, 0), 70);
+});
+
+test('하락률이 커도 단가가 0 이하로 내려가지 않는다', () => {
+  const base = new Map();
+  const tiers = expandTiers(
+    [{ name: '가', kind: 'cash', mm: false, c: 1000, k: 0, m: 1000, cap: Infinity, sellable: 1000 }],
+    { tierWidth: 0.1, tierDrop: 0.5 }, base,
+  );
+  assert.deepEqual(tiers.map(t => t.m), [1000, 500]);
+  assert.ok(tiers.every(t => t.m > 0));
+});
+
+test('구간을 쪼개도 상품 하나로 다시 합쳐진다', () => {
+  const base = new Map([['가 (95%가)', '가'], ['가 (90%가)', '가']]);
+  const merged = mergeTiers({
+    meso: 0, lines: [
+      { name: '가', kind: 'cash', mm: false, qty: 50, usedCash: 50000, usedCredit: 0, meso: 50000000 },
+      { name: '가 (95%가)', kind: 'cash', mm: false, qty: 20, usedCash: 20000, usedCredit: 0, meso: 19000000 },
+      { name: '나', kind: 'cash', mm: false, qty: 3, usedCash: 3000, usedCredit: 0, meso: 3000000 },
+    ],
+  }, base);
+  assert.deepEqual(merged.lines.map(l => [l.name, l.qty, l.meso]), [['가', 70, 69000000], ['나', 3, 3000000]]);
+});
+
+test('단가 하락 반영은 하드 컷보다 많이 사고 상한선보다는 적게 산다', () => {
+  // 거래량 500, 정가로 팔면 개당 100만 메소. 예산은 넉넉하다.
+  const item = { name: '가', kind: 'cash', mm: false, c: 1000, k: 0, m: 1000000, cap: Infinity, sellable: 500, earn: false };
+  const shared = { creditItems: [], cash: 1000000, credit: 0, earn: 0, earnCap: Infinity, minEarnCash: 10 };
+  const settings = { tierWidth: 0.1, tierDrop: 0.05 };
+
+  const ceiling = solve({ ...shared, items: [item] });
+  const hardCut = solve({ ...shared, items: [{ ...item, cap: Math.floor(500 * 0.2) }] });
+  const base = new Map();
+  const tiered = mergeTiers(solve({ ...shared, items: expandTiers([item], settings, base) }), base);
+
+  const qty = r => r.lines.reduce((sum, l) => sum + l.qty, 0);
+  assert.ok(qty(hardCut) <= qty(tiered), '하드 컷보다 적게 사면 안 된다');
+  assert.ok(qty(tiered) <= qty(ceiling), '상한선보다 많이 사면 안 된다');
+  // 단가가 떨어지므로 같은 수량이어도 획득 메소는 상한선보다 적다.
+  assert.ok(tiered.meso <= ceiling.meso);
 });

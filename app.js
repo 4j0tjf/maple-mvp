@@ -36,7 +36,7 @@ function bindNum(el, live = false){
 }
 ['chargeWon','ownCash','ownCredit','mesoPrice','mesoMarket','marketCap'].forEach(id => bindNum($('#'+id)));
 
-const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap','sellShare'];
+const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap','sellShare','tierWidth','tierDrop'];
 const CHK_IDS = ['useMarket','marketEarn'];
 
 function settings(){
@@ -55,7 +55,10 @@ function settings(){
     marketEarn: $('#marketEarn').checked,
     earnCap: $('#earnCap').value.trim() === '' ? Infinity : num($('#earnCap').value),
     // 최근 7일 거래량 중 내가 차지할 수 있다고 보는 몫. 판매량 고려 모드에서만 쓴다.
-    sellShare: num($('#sellShare').value) / 100
+    sellShare: num($('#sellShare').value) / 100,
+    // 단가 하락 반영 모드의 물량 구간 폭과 구간당 하락률.
+    tierWidth: num($('#tierWidth').value) / 100,
+    tierDrop: num($('#tierDrop').value) / 100
   };
 }
 
@@ -304,7 +307,17 @@ async function calculate(){
     // 2. 판매량 고려 — 7일 거래량 중 판매 점유율만큼만 실제로 팔 수 있다고 본다.
     $('#calcStatus').textContent = '판매량을 반영한 조합을 계산하고 있습니다…';
     const volume = await runOptimizer({ ...shared, items:cashCands.map(capBySales(s)), creditItems:creditCands.map(capBySales(s)) });
-    results = { efficiency, volume };
+    if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
+    // 3. 단가 하락 반영 — 못 파는 지점이 아니라 싸게 팔리는 지점으로 본다.
+    $('#calcStatus').textContent = '물량에 따른 단가 하락을 반영하고 있습니다…';
+    const tierBase = new Map();
+    // 구간 분할은 계산 모델이라 엔진(optimizer.js)에 있다. 화면은 그것을 부르기만 한다.
+    const { expandTiers, mergeTiers } = MvpOptimizer;
+    const tiered = mergeTiers(
+      await runOptimizer({ ...shared, items: expandTiers(cashCands, s, tierBase), creditItems: expandTiers(creditCands, s, tierBase) }),
+      tierBase,
+    );
+    results = { efficiency, volume, tiered };
   } catch(error) { showError(error.message); return; }
   finally { $('#bCalc').disabled = false; }
   if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
@@ -317,31 +330,31 @@ async function calculate(){
 function renderCompare({ results, s }) {
   const won = r => mesoToWon(r.meso, s);
   const rate = r => { const spent = r.usedCash * s.r; return spent > 0 ? won(r) / spent * 100 : NaN; };
-  const gap = won(results.volume) - won(results.efficiency);
-  $('#modeCompare').innerHTML = [
-    ['최고 효율 · 회수율', fx(rate(results.efficiency), 2), '%', ''],
-    ['최고 효율 · 회수 현금', comma(won(results.efficiency)), '원', ''],
-    ['판매량 고려 · 회수율', fx(rate(results.volume), 2), '%', ''],
-    ['판매량 고려 · 회수 현금', comma(won(results.volume)), '원', ''],
-    ['차이', (gap >= 0 ? '+' : '') + comma(gap), '원', gap >= 0 ? 'c-grn' : 'c-red'],
-  ].map(([k, n, u, c]) =>
-    '<div><div class="k">' + k + '</div><div class="n ' + c + '">' + n + (u ? '<small>' + u + '</small>' : '') + '</div></div>'
+  // 세 결과를 한 줄로 늘어놓아 어느 쪽이 얼마나 낙관적인지 바로 보이게 한다.
+  $('#modeCompare').innerHTML = MODES.map(([key, label]) =>
+    '<div><div class="k">' + label + '</div><div class="n ' + (key === activeMode ? 'c-org' : '') + '">'
+    + fx(rate(results[key]), 2) + '<small>% · 회수 ' + comma(won(results[key])) + '원</small></div></div>'
   ).join('');
-  $('#modeNote').innerHTML = activeMode === 'efficiency'
-    ? '<b>최고 효율</b>: 메소/캐시 효율만 봅니다. 최근 ' + depthWindow + '일 거래 ' + comma(depthMin)
-      + '건 미만 상품은 두 모드 모두에서 제외하지만, 이 모드는 수량을 거래량으로 묶지 않고 입력한 한도까지 삽니다.'
-      + ' 실제로 그만큼 팔 수 있는지는 직접 확인해야 합니다.'
-    : '<b>판매량 고려</b>: 최근 ' + depthWindow + '일 거래량의 <b>' + fx(s.sellShare * 100, 0)
-      + '%</b>까지만 내가 팔 수 있다고 보고 수량을 제한합니다. 거래가 많은 상품일수록 더 살 수 있습니다.';
+  const note = {
+    efficiency: '<b>최고 효율</b>: 메소/캐시 효율만 봅니다. 수량을 거래량으로 묶지 않고 입력한 한도까지 삽니다. '
+      + '실제로 그만큼 팔 수 있는지는 직접 확인해야 합니다. <b>상한선</b>으로 보세요.',
+    volume: '<b>판매량 고려</b>: 최근 ' + depthWindow + '일 거래량의 <b>' + fx(s.sellShare * 100, 0)
+      + '%</b>까지만 팔 수 있다고 보고 거기서 끊습니다. 그 지점을 넘는 물량은 아예 없는 것으로 칩니다.',
+    tiered: '<b>단가 하락 반영</b>: 못 파는 지점이 아니라 <b>싸게 팔리는 지점</b>으로 봅니다. 거래량의 '
+      + fx(s.tierWidth * 100, 0) + '%마다 단가가 ' + fx(s.tierDrop * 100, 0) + '%씩 떨어진다고 보고, '
+      + '엔진이 한계 수익이 떨어지는 지점에서 스스로 멈춥니다. 세 모드 중 가장 현실에 가깝습니다.',
+  }[activeMode];
+  $('#modeNote').innerHTML = note + ' 최근 ' + depthWindow + '일 거래 ' + comma(depthMin)
+    + '건 미만 상품은 세 모드 모두에서 제외합니다.';
 }
 
 /** 탭에 맞는 결과를 아래 카드들에 그린다. 계산은 이미 끝나 있어 즉시 바뀐다. */
 function renderMode(mode) {
   activeMode = mode;
-  $('#tabEfficiency').classList.toggle('on', mode === 'efficiency');
-  $('#tabVolume').classList.toggle('on', mode === 'volume');
-  $('#tabEfficiency').setAttribute('aria-selected', String(mode === 'efficiency'));
-  $('#tabVolume').setAttribute('aria-selected', String(mode === 'volume'));
+  for (const [key, , id] of MODES) {
+    $('#' + id).classList.toggle('on', mode === key);
+    $('#' + id).setAttribute('aria-selected', String(mode === key));
+  }
   if (!lastRun) return;
   renderCompare(lastRun);
   renderPlan(lastRun.results[mode], lastRun);
@@ -467,6 +480,12 @@ let activeWorker = null, rejectWorker = null, inputVersion = 0, loadingCashShop 
 /** 마지막 계산 결과 묶음. 탭을 바꿀 때 다시 계산하지 않고 이걸 다시 그린다. */
 let lastRun = null;
 let activeMode = 'efficiency';
+/** [결과 키, 탭 이름, 탭 요소 id]. 순서가 곧 화면 순서다. */
+const MODES = [
+  ['efficiency', '최고 효율', 'tabEfficiency'],
+  ['volume', '판매량 고려', 'tabVolume'],
+  ['tiered', '단가 하락 반영', 'tabTiered'],
+];
 /** 서버의 거래량 정책. 안내 문구에만 쓰므로 못 받으면 기본값으로 둔다. */
 let depthMin = 100, depthWindow = 7;
 
@@ -481,6 +500,7 @@ const capBySales = s => it =>
   typeof it.sellable === 'number' && Number.isFinite(it.sellable)
     ? { ...it, cap: Math.min(it.cap, Math.max(0, Math.floor(it.sellable * s.sellShare))) }
     : it;
+
 function showError(message) { $('#calcStatus').textContent = message; $('#result').style.display = 'none'; }
 function cancelCalculation() {
   if (activeWorker) { activeWorker.terminate(); activeWorker = null; rejectWorker?.(new Error('입력이 변경되어 계산을 취소했습니다.')); rejectWorker=null; }
@@ -528,6 +548,8 @@ function validateInputs() {
   check($('#minEarnCash'),'적립 최소 결제액',{max:10000000,int:true});
   check($('#earnCap'),'추가 적립 한도',{max:10000000,int:true,blank:true});
   check($('#sellShare'),'판매 점유율',{min:1,max:100});
+  check($('#tierWidth'),'물량 구간 폭',{min:1,max:100});
+  check($('#tierDrop'),'구간당 단가 하락',{min:0,max:50});
   if($('#useMarket').checked) {
     check($('#mesoMarket'),'메소마켓 시세',{min:1,max:10000000,int:true});
     check($('#marketCap'),'메소마켓 한도',{max:10000000,int:true,blank:true});
@@ -597,15 +619,14 @@ if (servedByMarket || ['localhost','127.0.0.1'].includes(location.hostname)) {
   $('#cashShopControls').hidden = false;
   $('#autoCashShop').checked = true;
 }
-$('#tabEfficiency').addEventListener('click', () => renderMode('efficiency'));
-$('#tabVolume').addEventListener('click', () => renderMode('volume'));
+MODES.forEach(([key, , id]) => $('#' + id).addEventListener('click', () => renderMode(key)));
 $('#autoCashShop').addEventListener('change', refresh);
 [...SET_IDS, ...CHK_IDS].forEach(id => $('#'+id).addEventListener('input', refresh));
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') calculate(); });
 
 (async () => {
   // 옛 HTML이 캐시돼 새 요소가 없으면 조용히 죽는 대신 원인을 알린다.
-  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','modeCompare','fixedNotes'].filter(id => !$('#'+id));
+  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','tabTiered','tierWidth','tierDrop','modeCompare','fixedNotes'].filter(id => !$('#'+id));
   if (missing.length) {
     document.body.insertAdjacentHTML('afterbegin',
       '<div class="note bad" style="margin:12px">이전 버전 화면이 캐시돼 있습니다. 새로고침(Ctrl+Shift+R) 후 다시 열어주세요.</div>');
