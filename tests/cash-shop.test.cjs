@@ -97,3 +97,29 @@ test('automatic product controls and script are included once',()=>{
   // 폐지된 마일리지 병용 입력이 남아 있지 않아야 한다.
   for(const id of ['ownMileage','mileRate','reuseMileage','earnOnCashOnly','marketMile']) assert.equal(html.includes('id="'+id+'"'),false);
 });
+
+test('그날 결과가 없으면 첫 방문에서 수집을 시작한다',async()=>{
+  const methods=[];
+  const started=await require('../cash-shop.js').startIfNeeded({status:'NOT_REQUESTED'},async(_url,opts)=>{
+    methods.push(opts.method);
+    return {ok:true,status:202,json:async()=>({status:'RUNNING'})};
+  });
+  assert.deepEqual(methods,['POST']);
+  assert.equal(started.status,'RUNNING');
+});
+
+test('이미 끝났거나 도는 중이면 시작하지 않는다',async()=>{
+  const {startIfNeeded}=require('../cash-shop.js');
+  const never=async()=>{throw new Error('요청하면 안 된다');};
+  for(const status of ['SUCCESS','PARTIAL','RUNNING']) assert.equal(await startIfNeeded({status},never),null);
+});
+
+test('실패한 날은 다시 시작해 보되 서버 거절은 조용히 넘긴다',async()=>{
+  const {startIfNeeded}=require('../cash-shop.js');
+  // 식힘 시간이 남았으면 서버가 저장된 결과를 그대로 준다. 오류로 올리지 않는다.
+  const again=await startIfNeeded({status:'FAIL'},async()=>({ok:true,status:200,json:async()=>({status:'FAIL'})}));
+  assert.equal(again.status,'FAIL');
+  // 네트워크가 끊겨도 보기만 하러 온 사람에게 오류를 띄우지 않는다.
+  assert.equal(await startIfNeeded({status:'FAIL'},async()=>{throw new Error('offline');}),null);
+  assert.equal(await startIfNeeded({status:'NOT_REQUESTED'},async()=>({ok:false,status:503,json:async()=>({error:'x'})})),null);
+});

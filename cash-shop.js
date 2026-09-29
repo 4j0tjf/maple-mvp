@@ -14,7 +14,17 @@
   const tradable = products => (products || []).filter(p => !(p.depth && p.depth.excluded));
   const thin = products => (products || []).filter(p => p.depth && p.depth.excluded)
     .map(p => ({ name: p.name, reason: p.depth.reason }));
-  function productRows(products) {
+  // 실제 판매되는 구성품 이름을 보존해 단품/묶음/결제 수단 사이의 수요를 합산한다.
+  function saleComponents(product, depths) {
+    const selected = product.variants.find(v => v.label === product.selected) || product.variants[0];
+    return (selected?.components || []).map(c => {
+      const depth = depths.find(d => d.name === c.name);
+      return { name: c.name, quantity: c.quantity, price: Number(c.quote?.price),
+        volume: depth ? (depth.recentQuantity ?? depth.recentSales) : null,
+        windowDays: depth?.windowDays ?? 7 };
+    });
+  }
+  function productRows(products, depths = []) {
     return tradable(products).map(p => ({
       cashShopId: p.id,
       name: p.name + (p.variants.length > 1 && p.selected ? ' · ' + p.selected : ''),
@@ -22,11 +32,12 @@
       meso: p.price != null && /^\d+$/.test(p.price) && Number.isSafeInteger(Number(p.price)) && Number(p.price)>0 ? p.price : '', cap: '',
       earn: p.creditEarns === true,
       depth: p.depth || null,
+      components: saleComponents(p, depths),
       metadataPending: p.cashPrice == null || p.creditEarns == null,
       comparisonComplete: p.comparisonComplete,
     }));
   }
-  function creditRows(products) {
+  function creditRows(products, depths = []) {
     return tradable(products).map(p => ({
       cashShopId: 'credit-' + p.id,
       name: p.name + (p.variants.length > 1 && p.selected ? ' · ' + p.selected : ''),
@@ -36,6 +47,7 @@
       cap: typeof p.monthlyLimit === 'number' ? String(p.monthlyLimit) : '',
       metadataPending: p.creditPrice == null,
       depth: p.depth || null,
+      components: saleComponents(p, depths),
       comparisonComplete: p.comparisonComplete,
     }));
   }
@@ -76,7 +88,29 @@
     }
     throw new Error('수집이 진행 중입니다. 잠시 후 계산을 다시 요청해주세요. 진행 중인 작업은 중복 실행되지 않습니다.');
   }
-  const api = {productRows, creditRows, thin, fetchToday, readToday, fixedProducts, defaultPolicy};
+  /** 아직 오늘 결과가 없어 수집을 시작해 볼 만한 상태인지. 실제 판단은 서버가 한다. */
+  const needsCollection = data => !['SUCCESS', 'PARTIAL', 'RUNNING'].includes(data.status);
+
+  /**
+   * 그날 첫 방문이면 수집을 시작한다. 계산 버튼을 누르지 않아도 된다.
+   *
+   * 워커의 정해진 시각에만 돌리면 그때 크롬이 꺼져 있을 때 하루를 날린다. 사람이
+   * 사이트를 보는 시점은 그 PC가 켜져 있다는 뜻이라 성공 확률이 높다.
+   *
+   * 시작해도 되는지는 서버가 정한다(식힘 시간, 횟수 상한). 여기서는 눌러 보기만 하고,
+   * 서버가 아직 아니라고 하면 저장된 결과가 그대로 돌아온다. 실패해도 조용히 넘어간다.
+   * 보기만 하러 온 사람에게 오류를 띄울 이유가 없다.
+   */
+  async function startIfNeeded(data, fetcher = fetch) {
+    if (!needsCollection(data)) return null;
+    try {
+      const response = await fetcher('/api/cash-shop', { method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(10000) });
+      const started = await response.json();
+      return response.ok || response.status === 409 ? started : null;
+    } catch { return null; }
+  }
+
+  const api = {productRows, creditRows, thin, fetchToday, readToday, startIfNeeded, needsCollection, fixedProducts, defaultPolicy};
   if(typeof module === 'object') module.exports = api;
   else root.CashShop = api;
 })(typeof window === 'undefined' ? globalThis : window);

@@ -36,7 +36,7 @@ function bindNum(el, live = false){
 }
 ['chargeWon','ownCash','ownCredit','mesoPrice','mesoMarket','marketCap'].forEach(id => bindNum($('#'+id)));
 
-const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap','sellShare','tierWidth','tierDrop'];
+const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap','sellShare','saleDays','tierWidth','tierDrop'];
 const CHK_IDS = ['useMarket','marketEarn'];
 
 function settings(){
@@ -56,6 +56,7 @@ function settings(){
     earnCap: $('#earnCap').value.trim() === '' ? Infinity : num($('#earnCap').value),
     // 최근 7일 거래량 중 내가 차지할 수 있다고 보는 몫. 판매량 고려 모드에서만 쓴다.
     sellShare: num($('#sellShare').value) / 100,
+    saleDays: num($('#saleDays').value),
     // 단가 하락 반영 모드의 물량 구간 폭과 구간당 하락률.
     tierWidth: num($('#tierWidth').value) / 100,
     tierDrop: num($('#tierDrop').value) / 100
@@ -89,6 +90,7 @@ function autoNote(tr, d){
   tr.dataset.metadataPending = d.metadataPending === false ? 'false' : 'true';
   // 판매량 고려 모드가 쓰는 값. 칸에 넣지 않고 행에 붙여 둔다.
   if (d.depth && typeof d.depth.sellable === 'number') tr.dataset.sellable = String(d.depth.sellable);
+  tr.saleComponents = d.components || [];
   const note = document.createElement('small'); note.className = 'f-auto-status';
   note.style.display = 'block'; note.style.fontSize = '13px';
   note.textContent = d.rowStatus || '자동 상품'; tr.cells[0].appendChild(note);
@@ -103,6 +105,7 @@ function addRow(d = {}){
     '<td><input type="text" class="f-cash" placeholder="3,300"></td>' +
     '<td><input type="text" class="f-meso" placeholder="500,000,000"></td>' +
     '<td><input type="text" class="f-cap" placeholder="무제한"></td>' +
+    '<td><input type="text" class="f-volume" placeholder="미확인" aria-label="최근 7일 거래량"></td>' +
     '<td><input type="checkbox" class="f-earn" checked aria-label="크레딧 적립 대상"></td>' +
     '<td class="effcell bad">—</td>' +
     '<td class="f-rr">—</td>' +
@@ -111,6 +114,9 @@ function addRow(d = {}){
   tr.querySelector('.f-cash').value = d.cash ?? '';
   tr.querySelector('.f-meso').value = d.meso ?? '';
   tr.querySelector('.f-cap').value  = d.cap  ?? '';
+  tr.querySelector('.f-volume').value = d.volume ?? '';
+  tr.querySelector('.f-volume').disabled = Boolean(d.cashShopId);
+  if (d.cashShopId) tr.querySelector('.f-volume').value = d.depth?.sellable ?? '';
   tr.querySelector('.f-earn').checked = d.earn !== false;
   autoNote(tr, d);
   if (d.cashShopId) tr.querySelector('.f-cash').placeholder = '원가 확인 필요';
@@ -131,12 +137,16 @@ function addCreditRow(d = {}){
     '<td><input type="text" class="f-credit" placeholder="10,000"></td>' +
     '<td><input type="text" class="f-meso" placeholder="450,000,000"></td>' +
     '<td><input type="text" class="f-cap" placeholder="무제한"></td>' +
+    '<td><input type="text" class="f-volume" placeholder="미확인" aria-label="최근 7일 거래량"></td>' +
     '<td class="effcell bad">—</td>' +
     '<td><button class="del" title="행 삭제">×</button></td>';
   tr.querySelector('.f-name').value   = d.name ?? '';
   tr.querySelector('.f-credit').value = d.credit ?? '';
   tr.querySelector('.f-meso').value   = d.meso ?? '';
   tr.querySelector('.f-cap').value    = d.cap ?? '';
+  tr.querySelector('.f-volume').value = d.volume ?? '';
+  tr.querySelector('.f-volume').disabled = Boolean(d.cashShopId);
+  if (d.cashShopId) tr.querySelector('.f-volume').value = d.depth?.sellable ?? '';
   autoNote(tr, d);
   if (d.cashShopId) tr.querySelector('.f-credit').placeholder = '크레딧 가격 확인 필요';
   [['.f-name','상품 이름'],['.f-credit','크레딧 가격'],['.f-meso','경매장 예상가'],['.f-cap','월 구매 한도']].forEach(([sel,label])=>tr.querySelector(sel).setAttribute('aria-label',label));
@@ -154,7 +164,8 @@ const readRows = () => [...$('#rows').children].map(tr => ({
   c:    num(tr.querySelector('.f-cash').value),
   gross:num(tr.querySelector('.f-meso').value),
   cap:  tr.querySelector('.f-cap').value.trim() === '' ? Infinity : num(tr.querySelector('.f-cap').value),
-  sellable: tr.dataset.sellable ? Number(tr.dataset.sellable) : null,
+  sellable: tr.querySelector('.f-volume').value.trim() === '' ? null : num(tr.querySelector('.f-volume').value),
+  components: tr.saleComponents || [],
   earn: tr.querySelector('.f-earn').checked,
   ready: !tr.dataset.cashShopId || (tr.dataset.metadataPending === 'false' && num(tr.querySelector('.f-cash').value)>0 && num(tr.querySelector('.f-meso').value)>0)
 }));
@@ -164,9 +175,56 @@ const readCreditRows = () => [...$('#creditRows').children].map(tr => ({
   k:    num(tr.querySelector('.f-credit').value),
   gross:num(tr.querySelector('.f-meso').value),
   cap:  tr.querySelector('.f-cap').value.trim() === '' ? Infinity : num(tr.querySelector('.f-cap').value),
-  sellable: tr.dataset.sellable ? Number(tr.dataset.sellable) : null,
+  sellable: tr.querySelector('.f-volume').value.trim() === '' ? null : num(tr.querySelector('.f-volume').value),
+  components: tr.saleComponents || [],
   ready: !tr.dataset.cashShopId || (tr.dataset.metadataPending === 'false' && num(tr.querySelector('.f-credit').value)>0 && num(tr.querySelector('.f-meso').value)>0)
 }));
+
+/* ===================== 목록 접기 ===================== */
+// 접힌 목록 이름("cash", "credit")은 <html data-fold>에 둔다. index.html head의 스크립트가 첫 페인트 전에 같은 키로 채운다.
+const FOLD_KEY = 'mvp-fold-v1';
+const folded = () => (document.documentElement.getAttribute('data-fold') || '').split(' ').filter(Boolean);
+function syncFold(){
+  document.querySelectorAll('[data-fold-toggle]').forEach(b => {
+    const shut = folded().includes(b.dataset.foldToggle);
+    b.setAttribute('aria-expanded', String(!shut));
+    b.title = shut ? '목록 펼치기' : '목록 접기';
+  });
+}
+function setFolded(list, shut){
+  const next = new Set(folded()); if (shut) next.add(list); else next.delete(list);
+  document.documentElement.setAttribute('data-fold', [...next].join(' '));
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...next])); } catch { /* 이번 화면에서만 적용 */ }
+  syncFold();
+}
+/** 접힌 표 안의 칸을 보여줘야 할 때(입력 오류, 행 추가) 그 목록을 편다. */
+function reveal(el){ const card = el && el.closest('[data-list]'); if (card && folded().includes(card.dataset.list)) setFolded(card.dataset.list, false); }
+document.querySelectorAll('[data-fold-toggle]').forEach(b => b.addEventListener('click', () => setFolded(b.dataset.foldToggle, !folded().includes(b.dataset.foldToggle))));
+syncFold();
+
+/** 접혀 있어도 목록의 핵심은 보이도록 제목 아래에 한 줄로 요약한다. */
+function summarizeLists(s, bar){
+  const cash = readRows().filter(it => it.name !== '(이름 없음)' || it.c > 0 || it.gross > 0);
+  let best = null;
+  for (const it of cash) if (it.c > 0 && it.gross > 0) {
+    const rate = recovery(it.c, it.gross * (1 - s.fee), s);
+    if (Number.isFinite(rate) && (!best || rate > best.rate)) best = { rate, name: it.name };
+  }
+  const ready = cash.filter(it => it.c > 0 && it.gross > 0).length;
+  $('#cashSummary').innerHTML = cash.length
+    ? '상품 <b>' + cash.length + '</b>개 · 계산 가능 <b>' + ready + '</b>개' +
+      (best ? ' · 최고 회수율 <b style="color:' + (best.rate >= bar ? 'var(--green)' : 'var(--red)') + '">' + fx(best.rate, 1) + '%</b> ' + esc(best.name) : '')
+    : '입력한 상품이 없습니다.';
+  const credit = readCreditRows().filter(it => it.name !== '(이름 없음)' || it.k > 0 || it.gross > 0);
+  let top = null;
+  for (const it of credit) if (it.k > 0 && it.gross > 0) {
+    const value = it.gross * (1 - s.fee) / it.k;
+    if (!top || value > top.value) top = { value, name: it.name };
+  }
+  $('#creditSummary').innerHTML = credit.length
+    ? '상품 <b>' + credit.length + '</b>개' + (top ? ' · 최고 효율 <b>' + comma(top.value) + '</b> 메소/크레딧 ' + esc(top.name) : '')
+    : '입력한 상품이 없습니다.';
+}
 
 /* ===================== 실시간 갱신 ===================== */
 function refresh(){
@@ -216,13 +274,14 @@ function refresh(){
   $('#creditValue').textContent = bestCredit > 0
     ? '최고 효율 ' + comma(bestCredit) + ' 메소/크레딧 · 1,000크레딧 ≈ ' + comma(mesoToWon(bestCredit*1000, s)) + '원'
     : '크레딧샵 상품의 시세를 입력하면 적립 크레딧의 가치를 계산합니다.';
+  summarizeLists(s, bar);
   save();
 }
 
 /* ===================== 계산 ===================== */
 function applyCashShop(data) {
-  const rows = CashShop.productRows(data.products || CashShop.fixedProducts);
-  const creditRows = CashShop.creditRows(data.creditProducts);
+  const rows = CashShop.productRows(data.products || CashShop.fixedProducts, data.depths || []);
+  const creditRows = CashShop.creditRows(data.creditProducts, data.depths || []);
   const thin = [...CashShop.thin(data.products), ...CashShop.thin(data.creditProducts)];
   const previous = new Map([...$('#rows').children,...$('#creditRows').children].filter(tr => tr.dataset.cashShopId).map(tr => [tr.dataset.cashShopId,tr.querySelector('.f-cap').value]));
   const manual = [...$('#rows').children].filter(tr => !tr.dataset.cashShopId && [...tr.querySelectorAll('input[type=text]')].some(i => i.value.trim()));
@@ -246,9 +305,11 @@ function applyCashShop(data) {
     if (typeof data.depthPolicy.minRecentSales === 'number') depthMin = data.depthPolicy.minRecentSales;
     if (typeof data.depthPolicy.windowDays === 'number') depthWindow = data.depthPolicy.windowDays;
   }
+  showPriceSource(data);
   const ready = rows.filter(r => !r.metadataPending && r.meso);
   const screening = data.creditScreening;
   $('#cashShopStatus').textContent = `${rows.length}개 상품 등록 · 계산 가능 ${ready.length}개` +
+    (data.depthCapturedAt ? ` · 거래량: ${new Date(data.depthCapturedAt).toLocaleDateString('ko-KR', {timeZone:'Asia/Seoul'})} 이후 조회값 (각 조회 시점 직전 7일)` : ' · 거래량 미확인') +
     (data.capturedAt ? ` · ${new Date(data.capturedAt).toLocaleString('ko-KR')} 조회` : '') +
     (data.pending?.length ? ` · 판매 공지 ${data.pending.length}건 구성 확인 대기` : '') +
     (failed ? ' · 오늘 시세 수집에 실패했습니다. 목록은 유지하며 자동 재검색하지 않습니다.' : data.status==='NOT_REQUESTED' ? ' · 계산 버튼을 누르면 오늘 시세를 조회합니다.' : '') +
@@ -289,9 +350,9 @@ async function calculate(){
     rawCredit = readCreditRows().filter(it => it.ready && it.k > 0 && it.gross > 0);
   }
   catch(error) { showError(error.message); return; }
-  const cashCands = raw.map(it => ({ name:it.name, mm:false, kind:'cash', earn:it.earn, c:it.c, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap, sellable:it.sellable }));
+  const cashCands = raw.map(it => ({ name:it.name, mm:false, kind:'cash', earn:it.earn, c:it.c, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap, sellable:it.sellable, components:it.components }));
   if (s.useMarket) cashCands.push({ name:'메소마켓 (메포 → 1억 메소)', mm:true, kind:'cash', earn:s.marketEarn, c:s.mesoMarket, m:1e8, cap:s.marketCap, sellable:null });
-  const creditCands = rawCredit.map(it => ({ name:it.name, mm:false, kind:'credit', k:it.k, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap, sellable:it.sellable }));
+  const creditCands = rawCredit.map(it => ({ name:it.name, mm:false, kind:'credit', k:it.k, m:Math.floor(it.gross*(1-s.fee)), cap:it.cap, sellable:it.sellable, components:it.components }));
   if (!cashCands.length && !creditCands.length) { showError('아이템을 입력하거나 메소마켓을 활성화하세요.'); return; }
   const chargeCash = Math.floor(s.chargeWon/s.r);
   const totalCash = s.ownCash + chargeCash;
@@ -306,24 +367,21 @@ async function calculate(){
     if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
     // 2. 판매량 고려 — 7일 거래량 중 판매 점유율만큼만 실제로 팔 수 있다고 본다.
     $('#calcStatus').textContent = '판매량을 반영한 조합을 계산하고 있습니다…';
-    const volume = await runOptimizer({ ...shared, items:cashCands.map(capBySales(s)), creditItems:creditCands.map(capBySales(s)) });
+    const { prepareSales } = MvpOptimizer;
+    const volume = await runOptimizer({ ...shared, items:prepareSales(cashCands, s), creditItems:prepareSales(creditCands, s) });
     if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
     // 3. 단가 하락 반영 — 못 파는 지점이 아니라 싸게 팔리는 지점으로 본다.
     $('#calcStatus').textContent = '물량에 따른 단가 하락을 반영하고 있습니다…';
-    const tierBase = new Map();
-    // 구간 분할은 계산 모델이라 엔진(optimizer.js)에 있다. 화면은 그것을 부르기만 한다.
-    const { expandTiers, mergeTiers } = MvpOptimizer;
-    const tiered = mergeTiers(
-      await runOptimizer({ ...shared, items: expandTiers(cashCands, s, tierBase), creditItems: expandTiers(creditCands, s, tierBase) }),
-      tierBase,
-    );
+    const tiered = await runOptimizer({ ...shared, items:prepareSales(cashCands, s, true), creditItems:prepareSales(creditCands, s, true) });
     results = { efficiency, volume, tiered };
   } catch(error) { showError(error.message); return; }
   finally { $('#bCalc').disabled = false; }
   if (version !== inputVersion) { $('#calcStatus').textContent = '입력이 변경되었습니다. 다시 계산해주세요.'; return; }
   // 계획에 적힌 수량이 시장 대비 얼마나 큰지 보여주려면 거래량이 필요하다.
   const volumes = new Map([...raw, ...rawCredit].filter(it => typeof it.sellable === 'number').map(it => [it.name, it.sellable]));
-  lastRun = { results, s, volumes };
+  const unknown = [...MvpOptimizer.prepareSales(cashCands, s), ...MvpOptimizer.prepareSales(creditCands, s)]
+    .filter(it => it.salesUnknown).map(it => it.name);
+  lastRun = { results, s, volumes, unknown: [...new Set(unknown)] };
   renderMode(activeMode);
   $('#result').scrollIntoView({ behavior:'smooth', block:'start' });
 }
@@ -338,16 +396,15 @@ function renderCompare({ results, s }) {
     + fx(rate(results[key]), 2) + '<small>% · 회수 ' + comma(won(results[key])) + '원</small></div></div>'
   ).join('');
   const note = {
-    efficiency: '<b>최고 효율</b>: 메소/캐시 효율만 봅니다. 수량을 거래량으로 묶지 않고 입력한 한도까지 삽니다. '
-      + '실제로 그만큼 팔 수 있는지는 직접 확인해야 합니다. <b>상한선</b>으로 보세요.',
-    volume: '<b>판매량 고려</b>: 최근 ' + depthWindow + '일 거래량의 <b>' + fx(s.sellShare * 100, 0)
-      + '%</b>까지만 팔 수 있다고 보고 거기서 끊습니다. 그 지점을 넘는 물량은 아예 없는 것으로 칩니다.',
-    tiered: '<b>단가 하락 반영</b>: 못 파는 지점이 아니라 <b>싸게 팔리는 지점</b>으로 봅니다. 거래량의 '
-      + fx(s.tierWidth * 100, 0) + '%마다 단가가 ' + fx(s.tierDrop * 100, 0) + '%씩 떨어진다고 보고, '
-      + '엔진이 한계 수익이 떨어지는 지점에서 스스로 멈춥니다. 세 모드 중 가장 현실에 가깝습니다.',
+    efficiency: '<b>최고 효율 · 비교용</b>: 물량 제약이 없는 낙관적 가정입니다. 전량 판매를 전제로 한 예상 회수액이며 실제 추천은 판매 현실 반영 탭을 확인하세요.',
+    volume: '<b>판매량 고려</b>: 최근 거래량을 <b>' + s.saleDays + '일</b>로 환산한 뒤 판매 점유율 <b>' + fx(s.sellShare * 100, 1)
+      + '%</b>를 적용합니다. 같은 구성품은 캐시·크레딧·패키지의 판매 수량을 합산합니다. 단가는 고정합니다.',
+    tiered: '<b>판매 현실 반영 · 기본 추천</b>: 판매기간 <b>' + s.saleDays + '일</b>, 판매 점유율 <b>' + fx(s.sellShare * 100, 1)
+      + '%</b> 이내에서 예상 회수액을 최대화합니다. 해당 기간 예상 거래량의 ' + fx(s.tierWidth * 100, 1)
+      + '%를 팔 때마다 구성품 단가를 최초 가격의 ' + fx(s.tierDrop * 100, 1) + '%씩 낮춥니다. 같은 구성품의 누적 판매량과 가격 구간을 함께 사용합니다.',
   }[activeMode];
-  $('#modeNote').innerHTML = note + ' 최근 ' + depthWindow + '일 거래 ' + comma(depthMin)
-    + '건 미만 상품은 세 모드 모두에서 제외합니다.';
+  $('#modeNote').innerHTML = note + ' 자동 상품은 최근 ' + depthWindow + '일 거래 ' + comma(depthMin)
+    + '건 미만이면 세 모드 모두에서 제외합니다. 거래량 미확인 상품은 판매량 고려·판매 현실 반영에서 제외합니다. 메소마켓은 입력한 구매 한도를 적용합니다. 예상치이며 기간 내 판매를 보장하지 않습니다.';
 }
 
 /** 탭에 맞는 결과를 아래 카드들에 그린다. 계산은 이미 끝나 있어 즉시 바뀐다. */
@@ -379,7 +436,7 @@ function marketShare(name, qty, volumes) {
     + fx(share, share < 1 ? 1 : 0) + '% · 일평균 ' + fx(days, 1) + '일치</small>';
 }
 
-function renderPlan(r, { s, volumes }) {
+function renderPlan(r, { s, volumes, unknown = [] }) {
   $('#calcStatus').textContent = r.exact ? '입력한 조건에서 최대 메소 조합을 확인했습니다.' : '탐색 범위에서 찾은 추천 조합입니다. 전역 최적해는 보장하지 않습니다.';
 
   const chargeUsed = Math.max(0, r.usedCash - s.ownCash);
@@ -436,6 +493,7 @@ function renderPlan(r, { s, volumes }) {
 
   // 이번 계산에서만 해당하는 사실. 매번 달라지므로 펼쳐 둔다.
   const n = [];
+  if (activeMode !== 'efficiency' && unknown.length) n.push(['bad', '거래량 미확인으로 추천 제외: ' + unknown.map(esc).join(', ') + '. 직접 입력한 상품은 최근 7일 거래량을 입력하세요. 자동 상품은 구성품별 거래량이 필요합니다.']);
   if (r.usedCredit > 0) n.push(['', '이 계획은 크레딧 <b>' + comma(r.usedCredit) + 'C</b>를 사용합니다. 보유 크레딧 ' + comma(s.ownCredit) + 'C와 적립분 ' + comma(r.earned) + 'C의 합 안에서만 구매할 수 있습니다.']);
   if (r.leftCredit > 0) n.push(['', '구매 후 남는 크레딧: <b>' + comma(r.leftCredit) + 'C</b>. 적립일로부터 1년 안에 크레딧샵에서 사용하세요.']);
   if (r.leftCash > 0) n.push(['', '남는 캐시: <b>' + comma(r.leftCash) + '</b>. 최대 회수액과 별개로 MVP 목표 금액만큼 소비했는지 확인하세요.']);
@@ -472,13 +530,13 @@ const snapshot = () => ({
   items: [...$('#rows').children].map(tr => ({
     cashShopId: tr.dataset.cashShopId || null,
     name: tr.querySelector('.f-name').value, cash: tr.querySelector('.f-cash').value,
-    meso: tr.querySelector('.f-meso').value, cap: tr.querySelector('.f-cap').value,
+    meso: tr.querySelector('.f-meso').value, cap: tr.querySelector('.f-cap').value, volume: tr.querySelector('.f-volume').value,
     earn: tr.querySelector('.f-earn').checked
   })),
   creditItems: [...$('#creditRows').children].map(tr => ({
     cashShopId: tr.dataset.cashShopId || null,
     name: tr.querySelector('.f-name').value, credit: tr.querySelector('.f-credit').value,
-    meso: tr.querySelector('.f-meso').value, cap: tr.querySelector('.f-cap').value
+    meso: tr.querySelector('.f-meso').value, cap: tr.querySelector('.f-cap').value, volume: tr.querySelector('.f-volume').value
   }))
 });
 const cleanId = value => typeof value==='string' && /^[a-zA-Z0-9_-]{1,150}$/.test(value) ? value : null;
@@ -492,8 +550,8 @@ function restore(d){
   for (const id of CHK_IDS) if (d.chk && typeof d.chk[id] === 'boolean') $('#'+id).checked = d.chk[id];
   $('#rows').replaceChildren();
   $('#creditRows').replaceChildren();
-  d.items.forEach(it=>addRow({cashShopId:cleanId(it.cashShopId),name:text(it.name,100),cash:text(it.cash),meso:text(it.meso),cap:text(it.cap),earn:it.earn!==false}));
-  credit.forEach(it=>addCreditRow({cashShopId:cleanId(it.cashShopId),name:text(it.name,100),credit:text(it.credit),meso:text(it.meso),cap:text(it.cap)}));
+  d.items.forEach(it=>addRow({cashShopId:cleanId(it.cashShopId),name:text(it.name,100),cash:text(it.cash),meso:text(it.meso),cap:text(it.cap),volume:text(it.volume),earn:it.earn!==false}));
+  credit.forEach(it=>addCreditRow({cashShopId:cleanId(it.cashShopId),name:text(it.name,100),credit:text(it.credit),meso:text(it.meso),cap:text(it.cap),volume:text(it.volume)}));
   if (!d.items.length) addRow();
   refresh(); return true;
 }
@@ -503,27 +561,15 @@ function load(){ try { const stored=localStorage.getItem(SKEY); if (stored) retu
 let activeWorker = null, rejectWorker = null, inputVersion = 0, loadingCashShop = false;
 /** 마지막 계산 결과 묶음. 탭을 바꿀 때 다시 계산하지 않고 이걸 다시 그린다. */
 let lastRun = null;
-let activeMode = 'efficiency';
+let activeMode = 'tiered';
 /** [결과 키, 탭 이름, 탭 요소 id]. 순서가 곧 화면 순서다. */
 const MODES = [
-  ['efficiency', '최고 효율', 'tabEfficiency'],
+  ['tiered', '판매 현실 반영 · 추천', 'tabTiered'],
   ['volume', '판매량 고려', 'tabVolume'],
-  ['tiered', '단가 하락 반영', 'tabTiered'],
+  ['efficiency', '최고 효율 · 비교용', 'tabEfficiency'],
 ];
 /** 서버의 거래량 정책. 안내 문구에만 쓰므로 못 받으면 기본값으로 둔다. */
 let depthMin = 100, depthWindow = 7;
-
-/**
- * 판매량 고려 모드의 수량 상한.
- *
- * 최근 거래량 전부를 나 혼자 팔 수는 없다. 그중 '판매 점유율'만큼만 소화할 수 있다고 본다.
- * 거래량을 모르는 항목(직접 입력한 상품, 메소마켓)은 묶지 않는다.
- * 모르는 것과 안 팔리는 것은 다르다.
- */
-const capBySales = s => it =>
-  typeof it.sellable === 'number' && Number.isFinite(it.sellable)
-    ? { ...it, cap: Math.min(it.cap, Math.max(0, Math.floor(it.sellable * s.sellShare))) }
-    : it;
 
 function showError(message) { $('#calcStatus').textContent = message; $('#result').style.display = 'none'; }
 function cancelCalculation() {
@@ -559,7 +605,7 @@ function validateInputs() {
     if(el.value.trim()==='' && blank)return;
     const n=num(el.value);
     if(el.value.trim()==='' || !Number.isFinite(n) || n<min || n>max || (int&&!Number.isSafeInteger(n))) {
-      el.focus(); throw new Error(label+' 값을 확인하세요 ('+min+'~'+max+(int?', 정수':'')+').');
+      reveal(el); el.focus(); throw new Error(label+' 값을 확인하세요 ('+min+'~'+max+(int?', 정수':'')+').');
     }
   };
   check($('#chargeRatio'),'충전 비율',{min:.01,max:100});
@@ -571,8 +617,9 @@ function validateInputs() {
   check($('#earnRate'),'크레딧 적립률',{max:100});
   check($('#minEarnCash'),'적립 최소 결제액',{max:10000000,int:true});
   check($('#earnCap'),'추가 적립 한도',{max:10000000,int:true,blank:true});
-  check($('#sellShare'),'판매 점유율',{min:1,max:100});
-  check($('#tierWidth'),'물량 구간 폭',{min:1,max:100});
+  check($('#saleDays'),'판매기간',{min:1,max:365,int:true});
+  check($('#sellShare'),'판매 점유율',{min:.01,max:100});
+  check($('#tierWidth'),'물량 구간 폭',{min:.01,max:100});
   check($('#tierDrop'),'구간당 단가 하락',{min:0,max:50});
   if($('#useMarket').checked) {
     check($('#mesoMarket'),'메소마켓 시세',{min:1,max:10000000,int:true});
@@ -585,6 +632,7 @@ function validateInputs() {
     check(c,(index+1)+'행 캐시 원가',{min:1,max:10000000,int:true});
     check(m,(index+1)+'행 경매장 예상가',{min:1,int:true});
     check(cap,(index+1)+'행 최대 수량',{max:10000000,int:true,blank:true});
+    check(tr.querySelector('.f-volume'),(index+1)+'행 최근 7일 거래량',{max:1000000,int:true,blank:true});
   }
   for(const [index,tr] of [...$('#creditRows').children].entries()) {
     if (tr.dataset.cashShopId && (tr.dataset.metadataPending !== 'false' || !tr.querySelector('.f-credit').value.trim() || !tr.querySelector('.f-meso').value.trim())) continue;
@@ -593,14 +641,15 @@ function validateInputs() {
     check(k,'크레딧샵 '+(index+1)+'행 크레딧 가격',{min:1,max:10000000,int:true});
     check(m,'크레딧샵 '+(index+1)+'행 경매장 예상가',{min:1,int:true});
     check(cap,'크레딧샵 '+(index+1)+'행 월 구매 한도',{max:10000000,int:true,blank:true});
+    check(tr.querySelector('.f-volume'),'크레딧샵 '+(index+1)+'행 최근 7일 거래량',{max:1000000,int:true,blank:true});
   }
 }
 
 /* ===================== 이벤트 ===================== */
-$('#bAdd').onclick = () => { addRow(); refresh(); };
-$('#bAddCredit').onclick = () => { addCreditRow(); refresh(); };
-$('#bClear').onclick = () => { if (confirm('입력한 아이템 목록을 모두 지웁니다. 계속할까요?')){ $('#rows').innerHTML=''; $('#creditRows').innerHTML=''; addRow(); addRow(); addRow(); refresh(); } };
-$('#bExample').onclick = () => { $('#rows').innerHTML=''; $('#creditRows').innerHTML=''; EXAMPLE.forEach(addRow); CREDIT_EXAMPLE.forEach(addCreditRow); refresh(); };
+$('#bAdd').onclick = () => { setFolded('cash', false); addRow(); refresh(); };
+$('#bAddCredit').onclick = () => { setFolded('credit', false); addCreditRow(); refresh(); };
+$('#bClear').onclick = () => { if (confirm('입력한 아이템 목록을 모두 지웁니다. 계속할까요?')){ $('#rows').innerHTML=''; $('#creditRows').innerHTML=''; setFolded('cash', false); setFolded('credit', false); addRow(); addRow(); addRow(); refresh(); } };
+$('#bExample').onclick = () => { setFolded('cash', false); setFolded('credit', false); $('#rows').innerHTML=''; $('#creditRows').innerHTML=''; EXAMPLE.forEach(addRow); CREDIT_EXAMPLE.forEach(addCreditRow); refresh(); };
 $('#bSort').onclick = () => {
   const s = settings();
   [...$('#rows').children].map(tr => {
@@ -639,18 +688,47 @@ $('#bCalc').onclick = calculate;
 // 아니라 이 페이지를 maple-market이 서빙하는지다.
 const servedByMarket = location.pathname.startsWith('/mvp');
 if (servedByMarket) $('#siteNav').hidden = false;
+// 상단 메뉴의 테마 스위치. 시세·사냥 기록과 같은 localStorage "theme"을 쓴다.
+// 옛 index.html이 캐시돼 스위치가 없어도 계산기는 그대로 돌아가야 한다.
+const themeSwitch = $('#themeSwitch');
+function syncThemeSwitch(){
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  themeSwitch.setAttribute('aria-checked', String(dark));
+  themeSwitch.title = dark ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기';
+}
+if (themeSwitch) {
+  themeSwitch.addEventListener('click', () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('theme', next); } catch { /* 이번 화면에서만 적용 */ }
+    syncThemeSwitch();
+  });
+  syncThemeSwitch();
+}
 if (servedByMarket || ['localhost','127.0.0.1'].includes(location.hostname)) {
   $('#cashShopControls').hidden = false;
   $('#autoCashShop').checked = true;
 }
 MODES.forEach(([key, , id]) => $('#' + id).addEventListener('click', () => renderMode(key)));
+$('#bFetch').addEventListener('click', async () => {
+  const button = $('#bFetch');
+  button.disabled = true;
+  button.textContent = '시세를 조회하고 있습니다…';
+  try {
+    const started = await CashShop.startIfNeeded({ status: 'NOT_REQUESTED' });
+    await kickCollection(started ?? { status: 'NOT_REQUESTED' });
+  } finally {
+    // 결과에 맞춰 버튼 상태를 다시 정한다. 조회가 끝나면 잠기고, 또 실패하면 다시 열린다.
+    try { showPriceSource(await CashShop.readToday()); } catch { button.disabled = false; button.textContent = '오늘 시세 조회하기'; }
+  }
+});
 $('#autoCashShop').addEventListener('change', refresh);
 [...SET_IDS, ...CHK_IDS].forEach(id => $('#'+id).addEventListener('input', refresh));
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') calculate(); });
 
 (async () => {
   // 옛 HTML이 캐시돼 새 요소가 없으면 조용히 죽는 대신 원인을 알린다.
-  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','tabTiered','tierWidth','tierDrop','modeCompare','fixedNotes'].filter(id => !$('#'+id));
+  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','tabTiered','sellShare','tierWidth','tierDrop','modeCompare','fixedNotes','bFetch','priceSource','cashSummary','creditSummary'].filter(id => !$('#'+id));
   if (missing.length) {
     document.body.insertAdjacentHTML('afterbegin',
       '<div class="note bad" style="margin:12px">이전 버전 화면이 캐시돼 있습니다. 새로고침(Ctrl+Shift+R) 후 다시 열어주세요.</div>');
@@ -663,6 +741,79 @@ document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.ke
       const version = inputVersion;
       const data = await CashShop.readToday();
       if (version === inputVersion && !loadingCashShop && !activeWorker) applyCashShop(data);
+      // 그날 첫 방문이면 여기서 수집이 시작된다. 계산 버튼을 기다리지 않는다.
+      void kickCollection(data);
     } catch(e) { $('#cashShopStatus').textContent = e.message+' 고정 상품 목록은 유지됩니다.'; }
   }
 })();
+
+/**
+ * 첫 방문 수집을 시작하고, 끝날 때까지 화면을 조용히 갱신한다.
+ *
+ * 사용자가 무언가를 누르기를 기다리지 않는다. 다만 사람이 입력 중이거나 계산 중이면
+ * 화면을 건드리지 않는다. 자동 상품 행을 갈아 끼우면 손으로 고친 값이 사라진다.
+ */
+async function kickCollection(data) {
+  const started = await CashShop.startIfNeeded(data);
+  if (!started || !CashShop.needsCollection(started)) {
+    if (started) applyIfIdle(started);
+    return;
+  }
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 15000));
+    let latest;
+    try { latest = await CashShop.readToday(); } catch { continue; }
+    if (!CashShop.needsCollection(latest)) { applyIfIdle(latest); return; }
+    applyIfIdle(latest);
+  }
+}
+
+/**
+ * 계산에 쓰는 시세가 언제 것인지 밝히고, 조회 버튼 상태를 정한다.
+ *
+ * 오늘 수집이 실패하면 서버가 가장 최근 성공한 날의 시세를 대신 내려준다. 계산기가
+ * 통째로 비는 것보다 낫지만, 어느 날 값인지 숨기면 오늘 시세로 오해한다. 그래서
+ * 지난 시세일 때는 눈에 띄게 알리고 다시 조회할 수 있게 한다.
+ *
+ * 오늘 시세가 있으면 버튼을 잠근다. 하루 1회면 충분하고, 다시 눌러 봐야 같은 결과다.
+ */
+function showPriceSource(data) {
+  const box = $('#priceSource');
+  const button = $('#bFetch');
+  if (!box || !button) return;
+  const today = !data.stale && data.priceDay;
+  const collecting = data.status === 'RUNNING';
+
+  if (today) {
+    box.hidden = true;
+    button.disabled = true;
+    button.textContent = '오늘 시세 조회 완료';
+  } else if (collecting) {
+    box.hidden = true;
+    button.disabled = true;
+    button.textContent = '시세를 조회하고 있습니다…';
+  } else if (data.priceDay) {
+    box.hidden = false;
+    box.className = 'note';
+    box.innerHTML = '오늘 시세를 구하지 못해 <b>' + esc(data.priceDay) + '</b> 시세로 계산합니다. '
+      + '그 사이 시세가 달라졌을 수 있습니다.';
+    button.disabled = !data.retryable;
+    button.textContent = data.retryable ? '오늘 시세 조회하기' : '오늘은 더 조회할 수 없습니다';
+  } else {
+    box.hidden = false;
+    box.className = 'note bad';
+    box.innerHTML = '<b>시세를 제공할 수 없습니다.</b> 오늘 수집이 실패했고 이전 기록도 없습니다. '
+      + 'Chrome에서 메이플 옥션이 로그인된 상태인지 확인한 뒤 다시 조회하세요.';
+    button.disabled = !data.retryable;
+    button.textContent = data.retryable ? '오늘 시세 조회하기' : '오늘은 더 조회할 수 없습니다';
+  }
+}
+
+function applyIfIdle(data) {
+  if (loadingCashShop || activeWorker) return;
+  const version = inputVersion;
+  applyCashShop(data);
+  // applyCashShop이 refresh()를 부르며 inputVersion을 올린다. 사용자의 편집과 구분한다.
+  inputVersion = version;
+}

@@ -35,12 +35,52 @@
         if (!it.k) throw new Error('크레딧 가격은 1 이상이어야 합니다.');
       }
     });
+    // 같은 옥션 아이템은 구매 경로/패키지와 무관하게 하나의 시장을 공유한다.
+    const markets = new Map();
+    entries.forEach(it => (it.sales || []).forEach(s => {
+      integer(s.cap, '판매 가능량', 10000000);
+      integer(s.quantity, '구성품 수량', 10000000);
+      integer(s.m, '구성품 순수익');
+      integer(s.step, '판매 가격 구간', 10000000);
+      if (!s.key || !s.quantity || !s.step || !Number.isFinite(s.drop) || s.drop < 0 || s.drop > 1) throw new Error('판매 조건을 확인하세요.');
+      const old = markets.get(s.key);
+      if (old) {
+        old.cap = Math.min(old.cap, s.cap);
+        old.m = Math.min(old.m, s.m);
+        old.step = Math.min(old.step, s.step);
+        old.drop = Math.max(old.drop, s.drop);
+      } else markets.set(s.key, { ...s, index: markets.size });
+    }));
+    const marketList = [...markets.values()];
+    for (const market of marketList) {
+      if (!market.m) market.cap = 0;
+      else if (market.drop > 0) market.cap = Math.min(market.cap, Math.ceil(1 / market.drop) * market.step);
+    }
+    const saleUses = entries.map(it => {
+      const uses = new Map();
+      for (const s of it.sales || []) uses.set(s.key, (uses.get(s.key) || 0) + s.quantity);
+      return [...uses].map(([key, quantity]) => ({ market: markets.get(key), quantity }));
+    });
+    const saleValue = (market, start, count) => {
+      let value = 0;
+      while (count > 0) {
+        const tier = Math.floor(start / market.step);
+        const factor = Math.max(0, 1 - market.drop * tier);
+        if (!factor) break;
+        const take = Math.min(count, market.step - start % market.step);
+        value += take * Math.floor(market.m * factor + 1e-7);
+        start += take; count -= take;
+      }
+      return value;
+    };
     const modes = [];
     entries.forEach((it, i) => {
       if (!it.m || it.cap === 0) return;
       // 10캐시 미만 결제와 적립 제외 상품은 크레딧을 주지 않는다.
       const reward = it.kind === 'cash' && it.earn !== false && it.c >= minEarnCash ? Math.floor(it.c * earn + 1e-7) : 0;
-      modes.push({ i, kind: it.kind, cc: it.c, kc: it.k, m: it.m, reward });
+      const sales = saleUses[i];
+      const m = sales.length ? sales.reduce((sum, s) => sum + s.market.m * s.quantity, 0) : it.m;
+      modes.push({ i, kind: it.kind, cc: it.c, kc: it.k, m, reward, sales });
     });
     const cashModes = modes.filter(md => md.kind === 'cash');
     const creditModes = modes.filter(md => md.kind === 'credit');
@@ -50,31 +90,44 @@
     if (cash * ratioCash + credit * ratioCredit > Number.MAX_SAFE_INTEGER) {
       throw new Error('예상 메소 합계가 정수 계산 범위를 넘습니다. 예산이나 입력 시세를 줄여주세요.');
     }
-    const initial = { cash, credit, earned: 0, meso: 0, counts: entries.map(() => 0), prev: null, step: null };
+    const initial = { cash, credit, earned: 0, meso: 0, counts: entries.map(() => 0), sold: marketList.map(() => 0), prev: null, step: null };
     let best = initial, exact = true, expanded = 0;
     const better = s => s.meso > best.meso || (s.meso === best.meso && (s.cash > best.cash || (s.cash === best.cash && s.credit > best.credit)));
     function advance(s, md, qty = 1) {
       const reward = Math.min(earnCap - s.earned, md.reward * qty);
       const counts = s.counts.slice(); counts[md.i] += qty;
+      const sold = s.sold.slice();
+      const meso = md.sales.length ? md.sales.reduce((sum, use) => {
+        const count = use.quantity * qty;
+        const value = saleValue(use.market, sold[use.market.index], count);
+        sold[use.market.index] += count;
+        return sum + value;
+      }, 0) : md.m * qty;
       const next = { cash: s.cash - md.cc * qty, credit: s.credit - md.kc * qty + reward, earned: s.earned + reward,
-        meso: s.meso + md.m * qty, counts, prev: s, step: { i: md.i, kind: md.kind, qty, cc: md.cc, kc: md.kc, reward } };
+        meso: s.meso + meso, counts, sold, prev: s, step: { i: md.i, kind: md.kind, qty, cc: md.cc, kc: md.kc, reward, meso } };
       if (better(next)) best = next;
       return next;
     }
-    const fits = (s, md) => s.cash >= md.cc && s.credit >= md.kc && s.counts[md.i] < entries[md.i].cap;
     const quantity = (s, md) => Math.min(md.cc ? Math.floor(s.cash / md.cc) : Infinity,
-      md.kc ? Math.floor(s.credit / md.kc) : Infinity, entries[md.i].cap - s.counts[md.i]);
+      md.kc ? Math.floor(s.credit / md.kc) : Infinity, entries[md.i].cap - s.counts[md.i],
+      ...md.sales.map(use => Math.floor((use.market.cap - s.sold[use.market.index]) / use.quantity)));
+    const fits = (s, md) => quantity(s, md) >= 1;
     // 크레딧 구매는 어떤 캐시 구매도 열어 주지 않으므로 캐시 → 크레딧 순서가 언제나 실행 가능하다.
     // 적립 크레딧의 가치를 다르게 본 여러 탐욕 초기안을 만든다.
     for (const weight of [0, .5, 1]) {
       let s = initial;
-      const density = md => md.kind === 'cash' ? (md.m + weight * md.reward * ratioCredit) / md.cc : md.m / md.kc;
+      const density = md => {
+        const value = md.sales.length ? md.sales.reduce((sum, use) => sum + saleValue(use.market, s.sold[use.market.index], use.quantity), 0) : md.m;
+        return md.kind === 'cash' ? (value + weight * Math.min(earnCap - s.earned, md.reward) * ratioCredit) / md.cc : value / md.kc;
+      };
       for (const phase of [[...cashModes], [...creditModes]]) {
-        phase.sort((a, b) => density(b) - density(a));
         for (let k = 0; k < 20000; k++) {
+          phase.sort((a, b) => density(b) - density(a));
           const md = phase.find(md => fits(s, md));
           if (!md) break;
-          s = advance(s, md, quantity(s, md));
+          const chunk = Math.min(quantity(s, md), ...md.sales.filter(use => use.market.drop > 0)
+            .map(use => Math.max(1, Math.floor((use.market.step - s.sold[use.market.index] % use.market.step) / use.quantity))));
+          s = advance(s, md, chunk);
         }
       }
     }
@@ -93,7 +146,7 @@
           if (++expanded > nodeLimit) { exact = false; break; }
           if (!fits(s, md)) continue;
           const next = advance(s, md);
-          const key = [next.cash, next.credit, earnCap === Infinity ? 0 : next.earned, ...finite.map(i => next.counts[i])].join(',');
+          const key = [next.cash, next.credit, earnCap === Infinity ? 0 : next.earned, ...finite.map(i => next.counts[i]), ...next.sold].join(',');
           const old = unique.get(key);
           if (!old || next.meso > old.meso) unique.set(key, next);
         }
@@ -116,7 +169,7 @@
       const byItem = new Map();
       for (const step of steps) {
         const prior = byItem.get(step.i);
-        if (prior) prior.qty += step.qty; else byItem.set(step.i, { ...step });
+        if (prior) { prior.qty += step.qty; prior.meso += step.meso; } else byItem.set(step.i, { ...step });
       }
       return [...byItem.values()];
     };
@@ -136,7 +189,7 @@
       line.qty += step.qty;
       line.usedCash += step.cc * step.qty;
       line.usedCredit += step.kc * step.qty;
-      line.meso += step.qty * line.m;
+      line.meso += step.meso;
     }
     return { lines, steps, exact, expanded, meso: best.meso, earned: best.earned,
       usedCash: cash - best.cash, usedCredit: lines.reduce((n, l) => n + l.usedCredit, 0),
@@ -196,6 +249,38 @@ function mergeTiers(result, base) {
   return { ...result, lines: [...merged.values()] };
 }
 
-  root.MvpOptimizer = { solve, expandTiers, mergeTiers, TIER_MAX };
-  if (typeof module !== 'undefined') module.exports = { solve, expandTiers, mergeTiers, TIER_MAX };
+  /** 기간 내 판매량과 구성품별 가격 하락을 계산 후보에 연결한다. */
+  function prepareSales(items, s, declining = false) {
+    if (!Number.isFinite(s.saleDays) || s.saleDays < 1 || s.saleDays > 365 ||
+        !Number.isFinite(s.sellShare) || s.sellShare <= 0 || s.sellShare > 1 ||
+        !Number.isFinite(s.tierWidth) || s.tierWidth <= 0 || s.tierWidth > 1 ||
+        !Number.isFinite(s.tierDrop) || s.tierDrop < 0 || s.tierDrop > 1) throw new Error('판매기간과 판매량 조건을 확인하세요.');
+    return items.map(it => {
+      if (it.mm) return it;
+      const components = it.components?.length ? it.components : [
+        { name: it.name, quantity: 1, price: it.m, volume: it.sellable, windowDays: 7 },
+      ];
+      const known = components.every(c => typeof c.name === 'string' && c.name.trim() &&
+        Number.isSafeInteger(c.quantity) && c.quantity > 0 &&
+        Number.isFinite(c.price) && c.price > 0 &&
+        Number.isSafeInteger(c.volume) && c.volume >= 0 &&
+        Number.isFinite(c.windowDays) && c.windowDays > 0);
+      if (!known) return { ...it, cap: 0, sales: [], salesUnknown: true };
+      const gross = components.reduce((sum, c) => sum + c.price * c.quantity, 0);
+      const sales = components.map(c => {
+        const periodVolume = c.volume / c.windowDays * s.saleDays;
+        return {
+          key: c.name.trim(), quantity: c.quantity,
+          cap: Math.min(10000000, Math.floor(periodVolume * s.sellShare + 1e-9)),
+          step: Math.min(10000000, Math.max(1, Math.floor(periodVolume * s.tierWidth + 1e-9))),
+          drop: declining ? s.tierDrop : 0,
+          m: Math.floor(it.m * (c.price / gross) + 1e-7),
+        };
+      });
+      return { ...it, sales };
+    });
+  }
+
+  root.MvpOptimizer = { solve, expandTiers, mergeTiers, prepareSales, TIER_MAX };
+  if (typeof module !== 'undefined') module.exports = { solve, expandTiers, mergeTiers, prepareSales, TIER_MAX };
 })(typeof self !== 'undefined' ? self : globalThis);

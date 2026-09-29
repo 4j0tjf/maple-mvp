@@ -5,16 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MVP작 최적화 계산기</title>
 <meta name="description" content="메이플스토리 캐시 결제와 메이플크레딧 적립·크레딧샵 구매를 함께 계산해 구매 조합과 순서를 찾습니다.">
+<!-- 첫 페인트 전에 테마를 정한다. maple-market/src/lib/theme.ts의 THEME_SCRIPT와 같은 내용이다. -->
+<script>(function(){var t;try{t=localStorage.getItem("theme")}catch(e){}if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.setAttribute("data-theme",t)})()</script>
+<!-- 접어 둔 아이템 목록을 첫 페인트 전에 접는다. 긴 표가 잠깐 펼쳐졌다 접히며 화면이 튀지 않게 한다. -->
+<script>(function(){try{var f=JSON.parse(localStorage.getItem("mvp-fold-v1")||"[]");if(Array.isArray(f))document.documentElement.setAttribute("data-fold",f.filter(function(x){return x==="cash"||x==="credit"}).join(" "))}catch(e){}})()</script>
 <style>
-  /* Maple Market(src/app/globals.css)의 표면·글자·강조 토큰을 그대로 따른다.
-     표면은 0(페이지) → 1(카드) → 2(입력/보조) → 3(hover) 순으로 밝아진다. */
+  /* Maple Market(src/app/globals.css)의 라이트·다크 토큰을 그대로 따른다(메이플로드 배색).
+     표면은 0(페이지) → 1(카드) → 2(입력/보조) → 3(hover) 순이다.
+     테마는 <html data-theme>로 고르고, 아래 인라인 스크립트가 첫 페인트 전에 채운다.
+     선택은 시세·사냥 기록과 같은 localStorage "theme"에 있다. */
   :root{
-    --bg:#09090b; --card:#131317; --card2:#1c1c21; --card3:#26262c;
-    --line:#2e2e35; --line2:#26262c; --line-strong:#43434c;
-    --ink:#f4f4f5; --ink2:#a1a1aa; --mute:#8f8f99;
-    --accent:#fbbf24; --accent-ink:#1c1917; --accent-soft:#2a2210;
-    --orange:#fb923c; --green:#4ade80; --red:#f87171;
+    --bg:#f1f4f8; --card:#ffffff; --card2:#f6f8fb; --card3:#e9eef5;
+    --line:#e2e8f0; --line2:#edf1f6; --line-strong:#cbd5e1;
+    --ink:#1e293b; --ink2:#475569; --mute:#56667a;
+    --accent:#b8421a; --accent-ink:#ffffff; --accent-soft:#fdf0ea; --accent-ring:rgba(184,66,26,.18);
+    --orange:#c2410c; --green:#047857; --red:#b91c1c;
+    --nav-bg:rgba(255,255,255,.9); --shadow:0 1px 2px rgba(15,23,42,.04),0 4px 16px rgba(15,23,42,.06);
+    --warn-bg:#fffbeb; --warn-line:#fde68a; --warn-ink:#92400e;
+    --ok-bg:#ecfdf5; --ok-line:#a7f3d0; --ok-ink:#065f46;
+    --bad-bg:#fef2f2; --bad-line:#fecaca; --bad-ink:#991b1b;
     --r:14px;
+    color-scheme:light;
+  }
+  :root[data-theme="dark"]{
+    --bg:#15171c; --card:#1f2937; --card2:#263243; --card3:#374151;
+    --line:#334155; --line2:#2b3646; --line-strong:#4b5563;
+    --ink:#e8ecf2; --ink2:#b4bfcd; --mute:#94a3b8;
+    --accent:#ff8a5c; --accent-ink:#1c1917; --accent-soft:#3a2a26; --accent-ring:rgba(255,138,92,.22);
+    --orange:#fb923c; --green:#4ade80; --red:#f87171;
+    --nav-bg:rgba(31,41,55,.9); --shadow:0 8px 24px rgba(0,0,0,.28);
+    --warn-bg:#2b2412; --warn-line:#57451a; --warn-ink:#fcd34d;
+    --ok-bg:#0f2a1f; --ok-line:#1d5b3c; --ok-ink:#86efac;
+    --bad-bg:#2d1719; --bad-line:#6b2226; --bad-ink:#fca5a5;
     color-scheme:dark;
   }
   *{box-sizing:border-box}
@@ -23,16 +45,35 @@
     background:var(--bg); color:var(--ink);
     font-family:"Pretendard","Pretendard Variable",-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
     font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    /* 한글은 낱말 중간에서 끊지 않고 띄어쓰기에서 줄을 바꾼다. */
+    word-break:keep-all; overflow-wrap:break-word;
   }
   .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px}
 
   /* Maple Market의 상단 내비게이션과 같은 구성. /mvp로 서빙될 때만 보인다. */
-  .sitenav{position:sticky;top:0;z-index:30;border-bottom:1px solid var(--line);background:rgba(9,9,11,.9);backdrop-filter:blur(8px)}
-  .sitenav .inner{max-width:1500px;margin:0 auto;display:flex;align-items:center;gap:4px;padding:0 20px}
-  .sitenav .brand{margin-right:20px;padding:14px 0;font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--ink)}
-  .sitenav a{border-bottom:2px solid transparent;padding:14px 12px;font-size:14px;font-weight:500;color:var(--mute);text-decoration:none;transition:color .12s}
-  .sitenav a:hover{color:var(--ink2)}
+  .sitenav{position:sticky;top:0;z-index:30;border-bottom:1px solid var(--line);background:var(--nav-bg);backdrop-filter:blur(8px)}
+  .sitenav .inner{max-width:1500px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:0 20px}
+  .sitenav .links{display:flex;align-items:center;gap:4px;flex:1;min-width:0;overflow-x:auto}
+  .sitenav a{flex:none;white-space:nowrap;border-bottom:2px solid transparent;padding:14px 12px;font-size:14px;font-weight:500;color:var(--mute);text-decoration:none;transition:color .12s}
+  .sitenav a:hover{color:var(--ink)}
   .sitenav a[aria-current=page]{border-bottom-color:var(--accent);color:var(--ink)}
+  .sitenav a.brand{display:flex;align-items:center;gap:6px;margin-right:20px;padding:14px 0;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+  .sitenav a.brand span{color:var(--accent)}
+  .sitenav a.brand svg{width:18px;height:18px;fill:var(--accent)}
+
+  /* 메이플로드 상단의 다크 모드 스위치. 손잡이와 아이콘 위치는 data-theme만 보고 CSS가 정한다. */
+  .theme-switch{position:relative;flex:none;width:52px;height:28px;padding:0;border:0;border-radius:999px;
+    background:var(--card3);box-shadow:inset 0 0 0 1px var(--line-strong);transition:background .2s}
+  .theme-switch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .theme-switch .knob{position:absolute;left:3px;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .2s}
+  .theme-switch svg{position:absolute;top:7px;width:14px;height:14px;transition:opacity .2s}
+  .theme-switch .moon{left:7px;fill:var(--accent-ink);opacity:0}
+  .theme-switch .sun{right:7px;fill:none;stroke:var(--ink2);stroke-width:2;stroke-linecap:round}
+  [data-theme="dark"] .theme-switch{background:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+  [data-theme="dark"] .theme-switch .knob{transform:translateX(24px)}
+  [data-theme="dark"] .theme-switch .moon{opacity:1}
+  [data-theme="dark"] .theme-switch .sun{opacity:0}
 
   .head{display:flex;gap:16px;align-items:flex-start;padding-bottom:20px;border-bottom:1px solid var(--line);margin-bottom:20px}
   .head h1{margin:0;font-size:27px;font-weight:800;letter-spacing:-.02em}
@@ -40,7 +81,7 @@
   .flow{margin-top:9px;font-size:12px;color:var(--mute)}
   .flow b{color:var(--accent);font-weight:700}
 
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:16px;box-shadow:var(--shadow)}
   .card > h2{margin:0 0 18px;font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px}
   .card > h2 .i{color:var(--accent)}
   .row-2{display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:stretch}
@@ -51,7 +92,7 @@
   .f .hint{font-size:11px;color:var(--mute);margin-top:5px;font-weight:400}
   .ig{display:flex;align-items:center;border:1px solid var(--line-strong);border-radius:9px;background:var(--card2);
       transition:border-color .12s,box-shadow .12s}
-  .ig:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(251,191,36,.18)}
+  .ig:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
   .ig input{border:0;outline:0;background:transparent;width:100%;padding:9px 11px;
       font:inherit;font-size:15px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
   .ig .unit{padding:0 11px 0 4px;color:var(--mute);font-size:12px;white-space:nowrap;font-weight:600}
@@ -84,6 +125,24 @@
 
   .tbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px}
   .tbar h2{margin:0}
+
+  /* 아이템 목록 접기. 접힌 목록은 <html data-fold>에 이름이 들어 있다(head의 스크립트가 첫 페인트 전에 채운다).
+     접으면 표만 감추고 요약 한 줄과 시세 상태·계산 버튼은 그대로 둔다. */
+  .ttl{min-width:0}
+  .fold{display:inline-flex;align-items:center;gap:8px;padding:0;border:0;background:none;color:var(--ink);
+    font:inherit;font-size:15px;font-weight:700;text-align:left}
+  .fold .i{color:var(--accent)}
+  .fold .chev{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:var(--card2);
+    box-shadow:inset 0 0 0 1px var(--line-strong);transition:transform .15s,background .12s}
+  .fold .chev svg{width:14px;height:14px;fill:none;stroke:var(--ink2);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+  .fold:hover .chev{background:var(--card3)}
+  .fold:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:7px}
+  .list-sum{margin:5px 0 0 32px;font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums}
+  .list-sum:empty{display:none}
+  .list-sum b{color:var(--ink);font-weight:700}
+  [data-fold~="cash"] #cashList .list-body,[data-fold~="credit"] #creditList .list-body{display:none}
+  [data-fold~="cash"] #cashList .fold .chev,[data-fold~="credit"] #creditList .fold .chev{transform:rotate(-90deg)}
+  [data-fold~="cash"] #cashList .tbar,[data-fold~="credit"] #creditList .tbar{margin-bottom:0}
   .btns{display:flex;gap:8px;flex-wrap:wrap}
   button{font:inherit;cursor:pointer}
   .btn{background:var(--card2);border:1px solid var(--line-strong);border-radius:9px;padding:8px 13px;font-size:12.5px;font-weight:600;color:var(--ink2)}
@@ -91,7 +150,7 @@
   .btn:focus-visible,.go:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .go{background:var(--accent);border:1px solid var(--accent);color:var(--accent-ink);border-radius:10px;
       padding:12px 30px;font-size:15px;font-weight:700;width:100%;margin-top:18px}
-  .go:hover{background:#f0b418}
+  .go:hover{filter:brightness(1.08)}
 
   .scroll{overflow-x:auto;margin:0 -22px;padding:0 22px}
   table{width:100%;border-collapse:collapse;min-width:940px}
@@ -107,11 +166,11 @@
       font-size:14px;width:100%;text-align:right;background:var(--card2);font-variant-numeric:tabular-nums;color:var(--ink);outline:0}
   td input.name{text-align:left;font-weight:600}
   td input[type=text]:hover{border-color:var(--line-strong)}
-  td input[type=text]:focus{border-color:var(--accent);background:var(--card3);box-shadow:0 0 0 3px rgba(251,191,36,.15)}
+  td input[type=text]:focus{border-color:var(--accent);background:var(--card3);box-shadow:0 0 0 3px var(--accent-ring)}
   td input::placeholder{color:var(--mute);font-weight:400}
   input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent);cursor:pointer;margin:0}
   .del{background:none;border:0;color:var(--mute);font-size:17px;padding:4px 7px;line-height:1;border-radius:6px}
-  .del:hover{color:var(--red);background:#2a1414}
+  .del:hover{color:var(--red);background:var(--bad-bg)}
   .effcell{font-weight:700;color:var(--accent)}
   .effcell.bad{color:var(--mute);font-weight:400}
   .rr{font-weight:800;font-size:14.5px}
@@ -124,10 +183,10 @@
   .plan .zero{color:var(--mute);font-weight:400}
   .plan tr.mm td{background:var(--accent-soft)}
   .plan tr.mm td:first-child{font-weight:700;color:var(--accent)}
-  .note{background:#241d0e;border:1px solid #4a3a12;border-radius:10px;padding:12px 14px;
-        font-size:12.5px;color:#fcd34d;margin-top:12px;line-height:1.7}
-  .note.ok{background:#0f2418;border-color:#1c5334;color:#86efac}
-  .note.bad{background:#2a1414;border-color:#5c1d1d;color:#fca5a5}
+  .note{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:10px;padding:12px 14px;
+        font-size:12.5px;color:var(--warn-ink);margin-top:12px;line-height:1.7}
+  .note.ok{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-ink)}
+  .note.bad{background:var(--bad-bg);border-color:var(--bad-line);color:var(--bad-ink)}
   .note b{font-weight:700}
   /* 확인 대기·제외 목록은 카드 안의 보조 정보다. 기본 불릿 대신 카드 표면을 쓴다. */
   .modetabs{display:flex;gap:8px;margin:4px 0 16px;flex-wrap:wrap}
@@ -158,11 +217,19 @@
 
 <nav class="sitenav" id="siteNav" hidden>
   <div class="inner">
-    <span class="brand">Maple Market</span>
-    <a href="/">시세 기록</a>
-    <a href="/admin">수집 관리</a>
-    <a href="/mvp" aria-current="page">MVP작</a>
-    <a href="/recovery">회수율 추이</a>
+    <div class="links">
+      <a class="brand" href="/"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 1.5 13.6 4.9 15.6 3.9 15.1 8.6 18.9 5.6 19.3 7.6 22.2 7.1 21.1 10.4 22.6 11.3 17.6 15.4 18.3 17.1 12.9 16.4 13.2 22.5 10.8 22.5 11.1 16.4 5.7 17.1 6.4 15.4 1.4 11.3 2.9 10.4 1.8 7.1 4.7 7.6 5.1 5.6 8.9 8.6 8.4 3.9 10.4 4.9Z"/></svg>스마트 <span>메라이프</span></a>
+      <a href="/market">시세 기록</a>
+      <a href="/admin">수집 관리</a>
+      <a href="/mvp" aria-current="page">MVP작</a>
+      <a href="/recovery">회수율 추이</a>
+      <a href="/hunting">사냥 기록</a>
+    </div>
+    <button type="button" class="theme-switch" id="themeSwitch" role="switch" aria-label="다크 모드">
+      <svg class="moon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8Z"/></svg>
+      <svg class="sun" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <span class="knob" aria-hidden="true"></span>
+    </button>
   </div>
 </nav>
 
@@ -171,7 +238,7 @@
   <div class="head">
     <div>
       <h1>MVP작 최적화 계산기</h1>
-      <p>충전한 현금을 최대한 많이 현금으로 되찾는 조합을 계산합니다</p>
+      <p>판매기간과 시장 물량을 고려해 예상 회수액이 큰 구매 조합을 계산합니다</p>
       <div class="flow">현금 → 캐시 → <b>캐시템 / 메소마켓</b> → 메소 → 물통 거래 → 현금 &nbsp;·&nbsp; 결제액의 5% <b>메이플크레딧</b> → 크레딧샵 상품 → 메소</div>
     </div>
   </div>
@@ -206,13 +273,18 @@
         </div>
         <div class="f">
           <label for="sellShare">판매 점유율</label>
-          <div class="ig"><input type="text" id="sellShare" value="20"><span class="unit">%</span></div>
-          <div class="hint">판매량 고려 · 거래량 중 내 몫</div>
+          <div class="ig"><input type="text" id="sellShare" value="5"><span class="unit">%</span></div>
+          <div class="hint">판매기간 예상 거래량 중 내 몫 · 판매 보장 아님</div>
+        </div>
+        <div class="f">
+          <label for="saleDays">판매기간</label>
+          <div class="ig"><input type="text" id="saleDays" value="7"><span class="unit">일</span></div>
+          <div class="hint">이 기간 안에 판매할 물량으로 제한</div>
         </div>
         <div class="f">
           <label for="tierWidth">물량 구간 폭</label>
-          <div class="ig"><input type="text" id="tierWidth" value="5"><span class="unit">%</span></div>
-          <div class="hint">단가 하락 반영 · 주간 거래량 대비</div>
+          <div class="ig"><input type="text" id="tierWidth" value="1"><span class="unit">%</span></div>
+          <div class="hint">판매기간 예상 거래량 대비 · 최소 1개 단위</div>
         </div>
         <div class="f">
           <label for="tierDrop">구간당 단가 하락</label>
@@ -269,9 +341,12 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card list-card" id="cashList" data-list="cash">
     <div class="tbar">
-      <h2><span class="i">📦</span> 캐시템 목록</h2>
+      <div class="ttl">
+        <h2><button type="button" class="fold" data-fold-toggle="cash" aria-controls="cashListBody" aria-expanded="true"><span class="chev"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span><span class="i">📦</span> 캐시템 목록</button></h2>
+        <p class="list-sum" id="cashSummary"></p>
+      </div>
       <div class="btns">
         <button class="btn" id="bExample">예시 채우기</button>
         <button class="btn" id="bSort">회수율순 정렬</button>
@@ -281,6 +356,7 @@
         <button class="btn" id="bAdd">+ 행 추가</button>
       </div>
     </div>
+    <div class="list-body" id="cashListBody">
     <div class="scroll">
       <table>
         <thead><tr>
@@ -288,6 +364,7 @@
           <th style="width:13%">캐시 원가</th>
           <th style="width:22%">경매장 예상가 (메소)</th>
           <th style="width:11%">최대 수량</th>
+          <th>최근 7일 거래량</th>
           <th style="width:10%">크레딧 적립</th>
           <th style="width:12%">효율 (메소/캐시)</th>
           <th style="width:14%">현금 회수율</th>
@@ -297,20 +374,27 @@
       </table>
     </div>
     <details id="thinMarketBox" class="sub-details" hidden><summary>최근 거래가 적어 제외된 상품</summary><ul id="thinMarket" class="list"></ul></details>
+    </div>
     <div id="cashShopControls" hidden style="margin:16px 0">
       <label><input id="autoCashShop" type="checkbox"> 계산할 때 캐시 상품 시세 자동 반영</label>
       <p style="font-size:14px">루나 기준 등록 최저가입니다. 하루 첫 계산 요청에만 수집하고 당일 결과를 공유합니다. 남/여 선택지는 각각의 최저가 중 높은 쪽을 사용합니다.</p>
       <div id="cashShopStatus" role="status" aria-live="polite"></div>
+      <div id="priceSource" class="note" hidden style="margin-top:10px"></div>
+      <button type="button" class="btn" id="bFetch" style="margin-top:10px" disabled>오늘 시세 조회하기</button>
       <p><a href="http://127.0.0.1:3000/admin/cash-shop" target="_blank" rel="noopener">상품 구성·캐시 원가·크레딧샵 목록 확인</a></p>
       <details><summary>판매 상품 확인 대기</summary><ul id="cashShopPending" class="list"></ul></details>
     </div>
   </div>
 
-  <div class="card">
+  <div class="card list-card" id="creditList" data-list="credit">
     <div class="tbar">
-      <h2><span class="i">🎟</span> 크레딧샵 상품</h2>
+      <div class="ttl">
+        <h2><button type="button" class="fold" data-fold-toggle="credit" aria-controls="creditListBody" aria-expanded="true"><span class="chev"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span><span class="i">🎟</span> 크레딧샵 상품</button></h2>
+        <p class="list-sum" id="creditSummary"></p>
+      </div>
       <div class="btns"><button class="btn" id="bAddCredit">+ 행 추가</button></div>
     </div>
+    <div class="list-body" id="creditListBody">
     <p style="font-size:13px;color:var(--ink2);margin:0 0 14px">적립한 크레딧으로만 살 수 있는 상품입니다. 캐시 상품 가격을 대신 낼 수 없으므로, 적립 크레딧의 가치는 여기서 살 수 있는 상품의 <b>메소/크레딧</b> 효율로 정해집니다.</p>
     <div class="scroll">
       <table class="narrow">
@@ -319,11 +403,13 @@
           <th style="width:15%">크레딧 가격</th>
           <th style="width:25%">경매장 예상가 (메소)</th>
           <th style="width:13%">월 구매 한도</th>
+          <th>최근 7일 거래량</th>
           <th style="width:15%">효율 (메소/크레딧)</th>
           <th style="width:36px"></th>
         </tr></thead>
         <tbody id="creditRows"></tbody>
       </table>
+    </div>
     </div>
     <div class="rule" id="creditValue" style="margin-top:14px">크레딧샵 상품의 시세를 입력하면 적립 크레딧의 가치를 계산합니다.</div>
     <div id="creditShopStatus" role="status" aria-live="polite" style="margin-top:10px;font-size:13px;color:var(--ink2)"></div>
@@ -337,10 +423,12 @@
         <b>목표는 주어진 예산에서 수수료 차감 후 획득 메소를 최대화하는 것입니다.</b>
         캐시 상품은 넥슨캐시로만 결제하고 결제액의 일정 비율이 메이플크레딧으로 적립됩니다. 크레딧샵 상품은 보유·적립 크레딧으로만 결제하며 추가 적립은 없습니다.
         두 화폐의 잔액과 상품별 구매 한도를 결제 전에 확인하고, 메소마켓은 1억 단위의 별도 구매 후보로 계산합니다.<br><br>
-        계산은 같은 입력으로 세 번 돌립니다. <b>최고 효율</b>은 입력한 최대 수량만 지키고, <b>판매량 고려</b>는
-        최근 거래량에 판매 점유율을 곱한 값에서 끊습니다. <b>단가 하락 반영</b>은 거래량의 일정 폭마다 단가가
-        조금씩 떨어진다고 보고 구간을 나눠, 한계 수익이 다른 상품보다 낮아지는 지점에서 멈춥니다.
-        거래량을 확인하지 못한 상품과 메소마켓은 어느 쪽에서도 물량으로 묶지 않습니다.<br><br>
+        기본 추천인 <b>판매 현실 반영</b>은 최근 거래량 ÷ 관측일수 × 판매기간 × 판매 점유율을 판매 상한으로 둡니다.
+        동일한 아이템은 캐시·크레딧·패키지 구성품을 합산해 상한과 가격 구간을 함께 사용합니다.
+        누적 판매가 한 구간 늘 때마다 최초 단가에서 설정한 하락률만큼 차감하며, 단가는 0 미만이 되지 않습니다.
+        <b>판매량 고려</b>는 같은 판매 한도에 고정 단가를 적용하고, <b>최고 효율 · 비교용</b>은 물량 제약 없이 계산합니다.
+        거래량 미확인 상품은 기본 추천에서 제외합니다. 직접 입력 상품은 최근 7일 거래량을 입력하세요.
+        메소마켓에는 입력한 구매 한도를 적용합니다. 실제 판매를 보장하는 예측은 아닙니다.<br><br>
         작은 문제는 모든 구매 조합을 탐색합니다. 계산량이 많으면 후보를 줄여 추천안을 찾으며, 이 경우 결과에 <b>최적해 미보장</b>을 표시합니다.
         크레딧 구매는 어떤 캐시 구매도 열어 주지 않으므로, 계획은 항상 <b>캐시 결제를 모두 마친 뒤</b> 크레딧샵 구매로 실행할 수 있습니다.<br><br>
         회수율 = 예상 회수 현금 ÷ (사용 캐시 × 충전 비율). 보유 캐시도 같은 비율로 원가에 포함합니다.
@@ -351,11 +439,11 @@
 
   <div id="result">
     <div class="card" id="modeCard">
-      <h2><span class="i">⚖️</span> 두 가지 계산</h2>
+      <h2><span class="i">⚖️</span> 추천과 비교</h2>
       <div class="modetabs" role="tablist" aria-label="계산 방식">
-        <button type="button" class="modetab on" id="tabEfficiency" role="tab" aria-selected="true">최고 효율</button>
+        <button type="button" class="modetab on" id="tabTiered" role="tab" aria-selected="true">판매 현실 반영 · 추천</button>
         <button type="button" class="modetab" id="tabVolume" role="tab" aria-selected="false">판매량 고려</button>
-        <button type="button" class="modetab" id="tabTiered" role="tab" aria-selected="false">단가 하락 반영</button>
+        <button type="button" class="modetab" id="tabEfficiency" role="tab" aria-selected="false">최고 효율 · 비교용</button>
       </div>
       <div class="sum" id="modeCompare"></div>
       <div class="rule" id="modeNote" style="margin-top:12px"></div>
