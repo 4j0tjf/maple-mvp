@@ -297,6 +297,11 @@
           <div class="ig"><input type="text" id="mesoPrice" value="1,550"><span class="unit">원</span></div>
           <div class="hint">유일한 현금 출구</div>
         </div>
+        <div class="f">
+          <label for="giftWon">선물형 비용 (MVP 1만원)</label>
+          <div class="ig"><input type="text" id="giftWon" value="7,000"><span class="unit">원</span></div>
+          <div class="hint">회수·크레딧 없음 · 비우면 비교 안 함</div>
+        </div>
       </div>
 
       <div class="rule">
@@ -338,7 +343,11 @@
         <div><span>1억 메소 판매 대금</span><b id="effB">—</b></div>
         <div><span>1억당 손익</span><b id="effC">—</b></div>
       </div>
-      <div class="msg">단위 가격 비교용 기준선입니다. 실제 조합은 적립 크레딧의 가치, 정수 수량, 구매 한도와 잔여 캐시에 따라 달라집니다.</div>
+      <div class="d" id="giftBase">
+        <div><span>선물형 환산 회수율</span><b id="giftRate">—</b></div>
+        <div><span>MVP 1만원 비용 · 선물형</span><b id="giftCost">—</b></div>
+      </div>
+      <div class="msg">단위 가격 비교용 기준선입니다. 실제 조합은 적립 크레딧의 가치, 정수 수량, 구매 한도와 잔여 캐시에 따라 달라집니다. 선물형은 회수 현금과 크레딧이 없어 비용 전부가 손실이므로, 회수율이 선물형 환산 회수율보다 높아야 일반 MVP작이 쌉니다.</div>
     </div>
   </div>
 
@@ -433,7 +442,10 @@
         작은 문제는 모든 구매 조합을 탐색합니다. 계산량이 많으면 후보를 줄여 추천안을 찾으며, 이 경우 결과에 <b>최적해 미보장</b>을 표시합니다.
         크레딧 구매는 어떤 캐시 구매도 열어 주지 않으므로, 계획은 항상 <b>캐시 결제를 모두 마친 뒤</b> 크레딧샵 구매로 실행할 수 있습니다.<br><br>
         회수율 = 예상 회수 현금 ÷ (사용 캐시 × 충전 비율). 보유 캐시도 같은 비율로 원가에 포함합니다.
-        이미 보유한 크레딧의 취득 원가와 가격 변동은 반영하지 않습니다.
+        이미 보유한 크레딧의 취득 원가와 가격 변동은 반영하지 않습니다.<br><br>
+        <b>선물형 비교</b>: 선물형은 MVP 1만원을 입력한 비용으로 채우고, 회수 현금과 크레딧이 없습니다.
+        선물형 환산 회수율 = 1 − 선물형 비용 ÷ (10,000 × 충전 비율). 사용 캐시를 MVP 금액으로 보고,
+        같은 금액을 선물형으로 채우는 비용(사용 캐시 × 선물형 비용 ÷ 10,000)과 이 계획의 실비용(원가 − 회수 현금)을 비교합니다.
       </div>
     </details>
   </div>

@@ -34,9 +34,9 @@ function bindNum(el, live = false){
   el.addEventListener('focus', () => { el.value = el.value.trim() === '' || !Number.isFinite(num(el.value)) ? el.value : String(num(el.value)); el.select(); });
   el.addEventListener('blur',  () => { el.value = el.value.trim() === '' || !Number.isFinite(num(el.value)) ? el.value : num(el.value).toLocaleString('ko-KR',{maximumFractionDigits:10}); });
 }
-['chargeWon','ownCash','ownCredit','mesoPrice','mesoMarket','marketCap'].forEach(id => bindNum($('#'+id)));
+['chargeWon','ownCash','ownCredit','mesoPrice','mesoMarket','marketCap','giftWon'].forEach(id => bindNum($('#'+id)));
 
-const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap','sellShare','saleDays','tierWidth','tierDrop'];
+const SET_IDS = ['chargeRatio','chargeWon','ownCash','ownCredit','earnRate','minEarnCash','fee','mesoPrice','mesoMarket','marketCap','earnCap','sellShare','saleDays','tierWidth','tierDrop','giftWon'];
 const CHK_IDS = ['useMarket','marketEarn'];
 
 function settings(){
@@ -59,7 +59,9 @@ function settings(){
     saleDays: num($('#saleDays').value),
     // 단가 하락 반영 모드의 물량 구간 폭과 구간당 하락률.
     tierWidth: num($('#tierWidth').value) / 100,
-    tierDrop: num($('#tierDrop').value) / 100
+    tierDrop: num($('#tierDrop').value) / 100,
+    // 선물형으로 MVP 1만원을 채우는 비용. 비우면 비교하지 않는다.
+    giftWon: $('#giftWon').value.trim() === '' ? null : num($('#giftWon').value)
   };
 }
 
@@ -245,6 +247,12 @@ function refresh(){
     $('#effC').style.color = diff >= 0 ? 'var(--green)' : 'var(--red)';
   } else {
     ['#effVal','#effA','#effB','#effC'].forEach(k => $(k).textContent = '—');
+  }
+  const gift = s.giftWon != null && s.giftWon >= 0 && s.r > 0 ? MvpOptimizer.giftCompare({ mvp: 0, spentWon: 0, gotWon: 0, giftWon: s.giftWon, r: s.r }) : null;
+  $('#giftBase').hidden = !gift;
+  if (gift) {
+    $('#giftRate').textContent = fx(gift.rate, 2) + '%';
+    $('#giftCost').textContent = comma(s.giftWon) + '원 · 회수 0';
   }
 
   const bar = s.useMarket && Number.isFinite(base) ? base : 100;
@@ -446,6 +454,9 @@ function renderPlan(r, { s, volumes, unknown = [] }) {
   const rate = spentWon > 0 ? gotWon / spentWon * 100 : NaN;
   const profit = gotWon - spentWon;
   const base = baseline(s);
+  // 같은 MVP(사용 캐시)를 선물형으로 채웠다면. 선물형은 회수도 크레딧도 없다.
+  const gift = s.giftWon != null && r.usedCash > 0
+    ? MvpOptimizer.giftCompare({ mvp: r.usedCash, spentWon, gotWon, giftWon: s.giftWon, r: s.r }) : null;
 
   /*
    * 결론부터 놓고, 같은 값을 두 번 적지 않는다.
@@ -466,6 +477,7 @@ function renderPlan(r, { s, volumes, unknown = [] }) {
     ...(newChargeWon !== spentWon ? [['필요 추가 충전액', comma(newChargeWon), '원', '']] : []),
     ...(r.earned > 0 ? [['적립 크레딧', '+' + comma(r.earned), 'C', 'c-grn']] : []),
     ...(r.usedCredit > 0 ? [['사용 크레딧', comma(r.usedCredit), 'C', 'c-grn']] : []),
+    ...(gift ? [['MVP 1만원당 실비용', comma(gift.planPerUnit), '원 · 선물형 ' + comma(s.giftWon) + '원', gift.saving >= 0 ? 'c-grn' : 'c-red']] : []),
   ].map(([k, n, u, c]) =>
     '<div><div class="k">' + k + '</div><div class="n ' + c + '">' + n + (u ? '<small>' + u + '</small>' : '') + '</div></div>'
   ).join('');
@@ -497,6 +509,10 @@ function renderPlan(r, { s, volumes, unknown = [] }) {
   if (r.usedCredit > 0) n.push(['', '이 계획은 크레딧 <b>' + comma(r.usedCredit) + 'C</b>를 사용합니다. 보유 크레딧 ' + comma(s.ownCredit) + 'C와 적립분 ' + comma(r.earned) + 'C의 합 안에서만 구매할 수 있습니다.']);
   if (r.leftCredit > 0) n.push(['', '구매 후 남는 크레딧: <b>' + comma(r.leftCredit) + 'C</b>. 적립일로부터 1년 안에 크레딧샵에서 사용하세요.']);
   if (r.leftCash > 0) n.push(['', '남는 캐시: <b>' + comma(r.leftCash) + '</b>. 최대 회수액과 별개로 MVP 목표 금액만큼 소비했는지 확인하세요.']);
+  if (gift) n.push([gift.saving >= 0 ? 'ok' : 'bad', '같은 MVP <b>' + comma(r.usedCash) + '원</b>을 선물형으로 채우면 <b>' + comma(gift.giftCost)
+    + '원</b>이 들고 회수·크레딧은 없습니다. 이 계획의 실비용은 <b>' + comma(gift.planCost) + '원</b>으로 선물형보다 <b>'
+    + comma(Math.abs(gift.saving)) + '원 ' + (gift.saving >= 0 ? '덜' : '더') + '</b> 듭니다. 선물형 환산 회수율은 <b>' + fx(gift.rate, 2)
+    + '%</b>이고 이 계획은 <b>' + fx(rate, 2) + '%</b>입니다.']);
   if (skipped.length) n.push(['', '이번 조합에서 미구매 <b>' + skipped.length + '종</b>: ' + skipped.map(esc).join(', ') + '.']);
   // 주간 거래량의 10%를 넘게 사는 계획은 따로 짚는다. 시장을 혼자 차지해야 가능한 물량이다.
   const heavy = sorted.filter(l => !l.mm && volumes.get(l.name) && l.qty / volumes.get(l.name) >= 0.1);
@@ -621,6 +637,7 @@ function validateInputs() {
   check($('#sellShare'),'판매 점유율',{min:.01,max:100});
   check($('#tierWidth'),'물량 구간 폭',{min:.01,max:100});
   check($('#tierDrop'),'구간당 단가 하락',{min:0,max:50});
+  check($('#giftWon'),'선물형 비용',{max:1000000,int:true,blank:true});
   if($('#useMarket').checked) {
     check($('#mesoMarket'),'메소마켓 시세',{min:1,max:10000000,int:true});
     check($('#marketCap'),'메소마켓 한도',{max:10000000,int:true,blank:true});
@@ -728,7 +745,7 @@ document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.ke
 
 (async () => {
   // 옛 HTML이 캐시돼 새 요소가 없으면 조용히 죽는 대신 원인을 알린다.
-  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','tabTiered','sellShare','tierWidth','tierDrop','modeCompare','fixedNotes','bFetch','priceSource','cashSummary','creditSummary'].filter(id => !$('#'+id));
+  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','tabTiered','sellShare','tierWidth','tierDrop','modeCompare','fixedNotes','bFetch','priceSource','cashSummary','creditSummary','giftWon','giftBase','giftRate','giftCost'].filter(id => !$('#'+id));
   if (missing.length) {
     document.body.insertAdjacentHTML('afterbegin',
       '<div class="note bad" style="margin:12px">이전 버전 화면이 캐시돼 있습니다. 새로고침(Ctrl+Shift+R) 후 다시 열어주세요.</div>');

@@ -281,6 +281,29 @@ function mergeTiers(result, base) {
     });
   }
 
-  root.MvpOptimizer = { solve, expandTiers, mergeTiers, prepareSales, TIER_MAX };
-  if (typeof module !== 'undefined') module.exports = { solve, expandTiers, mergeTiers, prepareSales, TIER_MAX };
+  /** 선물형 가격은 MVP 1만원 기준으로 입력한다. */
+  const GIFT_UNIT = 10000;
+  /**
+   * 같은 MVP 금액을 선물형으로 채웠을 때와 비교한다.
+   *
+   * 선물형은 MVP 1만원을 giftWon원에 채우고 끝난다. 받은 상품을 팔지 않아 회수 현금이 없고,
+   * 선물 결제라 크레딧도 적립되지 않는다. 그 비용 전부가 손실이다.
+   * 일반 MVP작은 같은 MVP를 사용 캐시 × 충전 비율로 채운 뒤 일부를 회수하므로 실비용은 원가 - 회수다.
+   *
+   * rate는 선물형 비용을 계산기의 회수율 척도(회수 현금 ÷ 사용 캐시 × 충전 비율)로 옮긴 값이다.
+   * 계획의 회수율이 이보다 높으면 같은 MVP를 일반 MVP작으로 채우는 쪽이 싸다.
+   */
+  function giftCompare({ mvp, spentWon, gotWon, giftWon, r }) {
+    if (!Number.isFinite(giftWon) || giftWon < 0 || !Number.isFinite(r) || r <= 0) throw new Error('선물형 비용과 충전 비율을 확인하세요.');
+    const giftCost = mvp * giftWon / GIFT_UNIT;
+    const planCost = spentWon - gotWon;
+    return {
+      rate: (1 - giftWon / (GIFT_UNIT * r)) * 100,
+      giftCost, planCost, saving: giftCost - planCost,
+      planPerUnit: mvp > 0 ? planCost / mvp * GIFT_UNIT : NaN,
+    };
+  }
+
+  root.MvpOptimizer = { solve, expandTiers, mergeTiers, prepareSales, giftCompare, TIER_MAX };
+  if (typeof module !== 'undefined') module.exports = { solve, expandTiers, mergeTiers, prepareSales, giftCompare, TIER_MAX };
 })(typeof self !== 'undefined' ? self : globalThis);
