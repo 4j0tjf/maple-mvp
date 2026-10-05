@@ -41,7 +41,7 @@
 
 Node.js에서 `npm test`로 테스트, `npm run build`로 정적 파일 생성, `npm start`로 로컬 실행합니다. 로컬 주소는 http://127.0.0.1:4173 입니다. HTML 파일을 직접 열면 Web Worker 보안 정책 때문에 계산이 동작하지 않을 수 있습니다.
 
-`dist/`의 다섯 파일만 정적 호스팅에 올리면 됩니다. 빌드 명령은 `npm run build`, 배포 디렉터리는 `dist`입니다. 비밀키나 환경변수는 없습니다. `.openai/hosting.json`은 연결한 Sites 식별자를 보관합니다.
+`dist/`의 여섯 파일만 정적 호스팅에 올리면 됩니다. 빌드 명령은 `npm run build`, 배포 디렉터리는 `dist`입니다. 비밀키나 환경변수는 없습니다. `.openai/hosting.json`은 연결한 Sites 식별자를 보관합니다.
 
 ## 계산 전제와 남은 개선점
 
