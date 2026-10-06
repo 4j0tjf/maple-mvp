@@ -184,6 +184,10 @@
   .plan .zero{color:var(--mute);font-weight:400}
   .plan tr.mm td{background:var(--accent-soft)}
   .plan tr.mm td:first-child{font-weight:700;color:var(--accent)}
+  /* 구간이 여러 개면 길어진다. 표를 넓히지 않고 구간 사이에서 줄을 바꾼다. */
+  .plan td.listing{white-space:normal;text-align:left;min-width:200px;line-height:1.7}
+  .plan td.listing .tier{white-space:nowrap}
+  .plan td.listing small{color:var(--mute);font-weight:400}
   .note{background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:10px;padding:12px 14px;
         font-size:12.5px;color:var(--warn-ink);margin-top:12px;line-height:1.7}
   .note.ok{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-ink)}
@@ -481,10 +485,12 @@
             <th>사용 크레딧</th>
             <th>획득 메소</th>
             <th>회수 현금</th>
+            <th style="text-align:left">경매장 추천 판매 가격</th>
           </tr></thead>
           <tbody id="planRows"></tbody>
         </table>
       </div>
+      <div class="rule" id="listingNote" style="margin-top:12px;display:block;line-height:1.65"></div>
     </div>
   </div>
 

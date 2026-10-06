@@ -444,6 +444,43 @@ function marketShare(name, qty, volumes) {
     + fx(share, share < 1 ? 1 : 0) + '% · 일평균 ' + fx(days, 1) + '일치</small>';
 }
 
+/** 메소를 억·만 단위로 읽기 쉽게 적는다. 1만 메소 단위로 반올림한다. */
+function mesoText(n) {
+  if (!Number.isFinite(n)) return '—';
+  if (n < 1e4) return comma(n);
+  const v = Math.round(n / 1e4), eok = Math.floor(v / 1e4), man = v % 1e4;
+  return (eok ? eok + '억' : '') + (man ? (eok ? ' ' : '') + comma(man) + '만' : '');
+}
+
+/**
+ * 경매장에 올릴 가격. 엔진이 가정한 개당 순수익에 경매장 수수료를 되붙인 값이다.
+ *
+ * 판매량을 반영한 계산은 같은 구성품을 캐시·크레딧·패키지 모든 줄에서 합산해 단가를 낮춘다.
+ * 그래서 가격은 줄이 아니라 구성품 단위로 정해진다. 다른 줄과 함께 파는 수량이면 합계를 적는다.
+ * 판매량을 반영하지 않는 계산(최고 효율)은 입력한 시세를 그대로 쓴다.
+ */
+function listingText(l, markets, s) {
+  if (l.mm) return '<span class="zero">경매장 판매 없음</span>';
+  const price = net => mesoText(MvpOptimizer.listingPrice(net, s.fee));
+  const row = (name, text, note = '') => '<div>' + (name ? '<small style="margin:0 4px 0 0">' + esc(name) + '</small>' : '') + text + note + '</div>';
+  if (l.sales?.length) {
+    const named = l.sales.length > 1 || l.sales[0].key !== l.name;
+    return l.sales.map(use => {
+      const market = markets.get(use.key);
+      if (!market) return '';
+      const mine = l.qty * use.quantity;
+      return row(named ? use.key : '', market.tiers.map(t => '<span class="tier"><b>' + price(t.m) + '</b> × ' + comma(t.count) + '</span>').join(' → '),
+        market.sold > mine ? ' <small>· 다른 줄과 합산 ' + comma(market.sold) + '개</small>' : '');
+    }).join('');
+  }
+  const parts = (l.components || []).filter(c => c.price > 0 && c.quantity > 0);
+  if (parts.length) {
+    const named = parts.length > 1 || parts[0].name !== l.name;
+    return parts.map(c => row(named ? c.name : '', '<b>' + mesoText(c.price) + '</b> × ' + comma(l.qty * c.quantity))).join('');
+  }
+  return row('', '<b>' + price(l.m) + '</b> × ' + comma(l.qty));
+}
+
 function renderPlan(r, { s, volumes, unknown = [] }) {
   $('#calcStatus').textContent = r.exact ? '입력한 조건에서 최대 메소 조합을 확인했습니다.' : '탐색 범위에서 찾은 추천 조합입니다. 전역 최적해는 보장하지 않습니다.';
 
@@ -493,6 +530,7 @@ function renderPlan(r, { s, volumes, unknown = [] }) {
   const boughtNames = new Set(r.lines.filter(l => l.qty > 0).map(l => l.name));
   const skipped = [...new Set(r.lines.filter(l => l.qty === 0).map(l => l.name))]
     .filter(name => !boughtNames.has(name));
+  const markets = new Map((r.markets || []).map(m => [m.key, m]));
   $('#planRows').innerHTML = sorted.map(l => {
     const z = v => v > 0 ? comma(v) : '<span class="zero">0</span>';
     return '<tr' + (l.mm ? ' class="mm"' : '') + '>' +
@@ -500,8 +538,16 @@ function renderPlan(r, { s, volumes, unknown = [] }) {
       '<td class="' + (l.kind === 'credit' ? 'mi' : 'ca') + '">' + (l.kind === 'credit' ? '크레딧샵' : '캐시') + '</td>' +
       '<td style="font-weight:700">' + z(l.qty) + '</td>' +
       '<td>' + comma(l.usedCash) + '</td><td>' + comma(l.usedCredit) + '</td>' +
-      '<td>' + comma(l.meso) + '</td><td>' + comma(mesoToWon(l.meso, s)) + '원</td></tr>';
-  }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--mute);padding:20px">구매할 수 있는 조합이 없습니다</td></tr>';
+      '<td>' + comma(l.meso) + '</td><td>' + comma(mesoToWon(l.meso, s)) + '원</td>' +
+      '<td class="listing">' + listingText(l, markets, s) + '</td></tr>';
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--mute);padding:20px">구매할 수 있는 조합이 없습니다</td></tr>';
+
+  $('#listingNote').innerHTML = '<b>경매장 추천 판매 가격</b>은 이 계획이 가정한 판매 단가에 경매장 수수료 ' + fx(s.fee * 100, 1)
+    + '%를 되붙인 개당 가격입니다(1만 메소 단위 반올림). '
+    + (activeMode === 'tiered'
+      ? '판매 현실 반영은 많이 팔수록 단가를 낮춰 계산하므로, <b>앞 가격으로 적힌 수량을 다 판 뒤 다음 가격으로</b> 내려 올리세요. 같은 아이템은 모든 줄의 판매량을 합쳐 셉니다.'
+      : '이 탭은 단가를 낮추지 않으므로 입력한 경매장 예상가 그대로입니다.')
+    + ' 경쟁 매물과 시세 변동은 반영하지 않으며 판매를 보장하지 않습니다.';
 
   // 이번 계산에서만 해당하는 사실. 매번 달라지므로 펼쳐 둔다.
   const n = [];
@@ -745,7 +791,7 @@ document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.ke
 
 (async () => {
   // 옛 HTML이 캐시돼 새 요소가 없으면 조용히 죽는 대신 원인을 알린다.
-  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','tabTiered','sellShare','tierWidth','tierDrop','modeCompare','fixedNotes','bFetch','priceSource','cashSummary','creditSummary','giftWon','giftBase','giftRate','giftCost'].filter(id => !$('#'+id));
+  const missing = ['rows','creditRows','ownCredit','minEarnCash','bCalc','sellShare','tabVolume','tabTiered','sellShare','tierWidth','tierDrop','modeCompare','fixedNotes','bFetch','priceSource','cashSummary','creditSummary','giftWon','giftBase','giftRate','giftCost','listingNote'].filter(id => !$('#'+id));
   if (missing.length) {
     document.body.insertAdjacentHTML('afterbegin',
       '<div class="note bad" style="margin:12px">이전 버전 화면이 캐시돼 있습니다. 새로고침(Ctrl+Shift+R) 후 다시 열어주세요.</div>');

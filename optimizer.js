@@ -191,9 +191,33 @@
       line.usedCredit += step.kc * step.qty;
       line.meso += step.meso;
     }
+    // 계획대로 파는 구성품의 수량과 구간별 단가. 경매장에 올릴 가격을 보여줄 때 쓴다.
+    const soldMarkets = marketList.map((market, index) => ({ key: market.key, sold: best.sold[index], tiers: saleTiers(market, best.sold[index]) }))
+      .filter(market => market.sold > 0);
     return { lines, steps, exact, expanded, meso: best.meso, earned: best.earned,
       usedCash: cash - best.cash, usedCredit: lines.reduce((n, l) => n + l.usedCredit, 0),
-      leftCash: best.cash, leftCredit: best.credit };
+      leftCash: best.cash, leftCredit: best.credit, markets: soldMarkets };
+  }
+
+  /** 한 시장에서 처음부터 count개를 팔 때 구간별 수량과 개당 순수익. solve의 saleValue와 같은 규칙이다. */
+  function saleTiers(market, count) {
+    const tiers = [];
+    for (let start = 0; count > 0;) {
+      const factor = Math.max(0, 1 - market.drop * Math.floor(start / market.step));
+      if (!factor) break;
+      const take = Math.min(count, market.step - start % market.step);
+      const m = Math.floor(market.m * factor + 1e-7);
+      const last = tiers[tiers.length - 1];
+      if (last && last.m === m) last.count += take; else tiers.push({ count: take, m });
+      start += take; count -= take;
+    }
+    return tiers;
+  }
+
+  /** 경매장 수수료를 떼고 net 메소가 남도록 올릴 가격. */
+  function listingPrice(net, fee) {
+    if (!Number.isFinite(net) || net < 0 || !Number.isFinite(fee) || fee < 0 || fee >= 1) return NaN;
+    return Math.ceil(net / (1 - fee) - 1e-6);
   }
 /** 한 상품을 몇 구간까지 쪼갤지. 너무 잘게 나누면 후보만 늘고 결과는 거의 같다. */
 const TIER_MAX = 6;
@@ -304,6 +328,6 @@ function mergeTiers(result, base) {
     };
   }
 
-  root.MvpOptimizer = { solve, expandTiers, mergeTiers, prepareSales, giftCompare, TIER_MAX };
-  if (typeof module !== 'undefined') module.exports = { solve, expandTiers, mergeTiers, prepareSales, giftCompare, TIER_MAX };
+  root.MvpOptimizer = { solve, expandTiers, mergeTiers, prepareSales, giftCompare, listingPrice, TIER_MAX };
+  if (typeof module !== 'undefined') module.exports = { solve, expandTiers, mergeTiers, prepareSales, giftCompare, listingPrice, TIER_MAX };
 })(typeof self !== 'undefined' ? self : globalThis);
